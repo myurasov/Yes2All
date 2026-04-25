@@ -84,7 +84,7 @@ The menu-bar icon shows a ✓ when the watcher is loaded and ○ when stopped. I
 
 - **Start / Stop** — toggle the background watcher
 - **Ports** — enable/disable Cursor (9222) and VS Code (9333) with live status detection
-- **Sweep inactive tabs** — toggle scanning of background Cursor chat tabs
+- **Cycle Cursor tabs** — toggle scanning of background Cursor chat tabs
 - **Interval** — adjust the poll frequency
 - **Open log** — view watcher output
 

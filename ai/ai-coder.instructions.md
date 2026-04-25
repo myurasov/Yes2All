@@ -55,7 +55,7 @@ Project-specific directions captured from the user. Update this file whenever th
 - LaunchAgent label `com.yes2all.menubar`, plist at `~/Library/LaunchAgents/`. `LimitLoadToSessionType=Aqua` so it only runs in the GUI session.
 - Install/remove auto-start: `uv run yes2all service install-menubar` / `uninstall-menubar`. Logs at `~/Library/Logs/yes2all/menubar.{out,err}.log`.
 - Title icon: `✓` watcher loaded, `○` not loaded. Polls `launchctl list` every 3s.
-- Menu: Start / Stop / Sweep inactive tabs (toggle, reinstalls watcher) / Open log / Quit.
+- Menu: Start / Stop / Cycle Cursor tabs (toggle, reinstalls watcher) / Open log / Quit.
 
 ## Hide Python from Dock
 
@@ -86,7 +86,7 @@ Project-specific directions captured from the user. Update this file whenever th
 ## Menubar config persistence
 
 - `service.read_installed_args()` parses the installed launchd plist's `ProgramArguments` and returns `{ports, interval, sweep_tabs}` (or `None`).
-- The menubar app hydrates from this on startup and on every status tick, so CLI-driven `service install --port ...` changes are preserved across menubar reinstalls (e.g., toggling "Sweep inactive tabs").
+- The menubar app hydrates from this on startup and on every status tick, so CLI-driven `service install --port ...` changes are preserved across menubar reinstalls (e.g., toggling "Cycle Cursor tabs").
 
 ## Menubar port checkboxes
 
