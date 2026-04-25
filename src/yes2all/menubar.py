@@ -117,11 +117,20 @@ class Yes2AllApp(rumps.App):
         # One checkbox per known port, grouped under a "Ports" submenu.
         # Label is detected live from each port's /json/version endpoint.
         self.port_items: dict[int, rumps.MenuItem] = {}
+        known_port_set = {p for p, _ in KNOWN_PORTS}
         for prt, default_name in KNOWN_PORTS:
             mi = rumps.MenuItem(self._port_label(prt, default_name),
                                 callback=self._make_port_toggle(prt))
             mi.state = 1 if prt in self.ports else 0
             self.port_items[prt] = mi
+        # Also create checkboxes for any extra ports from the plist.
+        for prt in self.ports:
+            if prt not in known_port_set:
+                detected = _detect_app(prt) or f"Port {prt}"
+                mi = rumps.MenuItem(f"{detected} ({prt})",
+                                    callback=self._make_port_toggle(prt))
+                mi.state = 1
+                self.port_items[prt] = mi
         ports_menu = rumps.MenuItem("Ports")
         for mi in self.port_items.values():
             ports_menu.add(mi)
@@ -178,9 +187,18 @@ class Yes2AllApp(rumps.App):
             self.sweep_item.state = 1 if self.sweep_tabs else 0
             self.interval_item.title = self._interval_title()
         # Re-detect app on each known port and refresh checkbox label/state.
-        for (prt, default_name), mi in zip(KNOWN_PORTS, self.port_items.values(), strict=True):
+        known_ports_set = {p for p, _ in KNOWN_PORTS}
+        for (prt, default_name), mi in zip(KNOWN_PORTS, [self.port_items[p] for p, _ in KNOWN_PORTS], strict=True):
             mi.title = self._port_label(prt, default_name)
             mi.state = 1 if prt in self.ports else 0
+        # Also refresh dynamically-added ports.
+        for prt, mi in self.port_items.items():
+            if prt not in known_ports_set:
+                detected = _detect_app(prt) or f"Port {prt}"
+                n = _state.read_counts().get(prt, 0)
+                suffix = f": {n} approved" if n else ""
+                mi.title = f"{detected} ({prt}){suffix}"
+                mi.state = 1 if prt in self.ports else 0
 
     def _port_label(self, prt: int, default_name: str) -> str:
         detected = _detect_app(prt)
@@ -301,11 +319,27 @@ class Yes2AllApp(rumps.App):
             rumps.notification("Yes2All", "Already watching", f"port {prt}")
             return
         self.ports = sorted(set(self.ports) | {prt})
-        # If this port isn't in KNOWN_PORTS there is no checkbox for it,
-        # but the watcher will still poll it. About dialog reflects all ports.
+
+        # Add a dynamic checkbox menu item if this port isn't already known.
+        if prt not in self.port_items:
+            detected = _detect_app(prt) or f"Port {prt}"
+            mi = rumps.MenuItem(f"{detected} ({prt})",
+                                callback=self._make_port_toggle(prt))
+            mi.state = 1
+            self.port_items[prt] = mi
+            # Insert before the separator (after existing port checkboxes).
+            self.menu["Ports"].insert_before(rumps.separator, mi)
+
         if self._reinstall_if_loaded():
             rumps.notification("Yes2All", "Port added", f"watching {self.ports}")
         else:
+            # Watcher not running — persist by starting then stopping so the
+            # plist records the new port list for the next Start.
+            try:
+                svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs)
+                svc.uninstall()
+            except Exception:  # noqa: BLE001
+                pass
             rumps.notification("Yes2All", "Port added",
                                f"will watch {self.ports} once started")
         self._refresh_status()
