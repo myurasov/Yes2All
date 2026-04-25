@@ -91,6 +91,11 @@ def main() -> None:
     render_circle(22, OUT / "icon-off-light.png", WHITE, pad=MENU_PAD)
     render_circle(44, OUT / "icon-off-light@2x.png", WHITE, pad=MENU_PAD)
 
+    # Menubar checkmark (flash state — brief green pulse on click).
+    GREEN = (40, 200, 80, 255)
+    render_check(22, OUT / "icon-flash.png", GREEN, pad=MENU_PAD)
+    render_check(44, OUT / "icon-flash@2x.png", GREEN, pad=MENU_PAD)
+
     # About dialog (full-bleed checkmark).
     render_check(256, OUT / "icon-large-dark.png", BLACK)
     render_check(256, OUT / "icon-large-light.png", WHITE)
