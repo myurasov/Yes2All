@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,6 +21,7 @@ except Exception:
     pass
 
 from . import service as svc
+from . import state as _state
 
 _ASSETS = Path(__file__).parent / "assets"
 # Two flat checkmark variants (loaded) + two open-circle variants (stopped).
@@ -28,8 +30,12 @@ ICON_DARK = str(_ASSETS / "icon-dark.png")    # black check, for Light theme
 ICON_LIGHT = str(_ASSETS / "icon-light.png")  # white check, for Dark theme
 ICON_OFF_DARK = str(_ASSETS / "icon-off-dark.png")
 ICON_OFF_LIGHT = str(_ASSETS / "icon-off-light.png")
+ICON_FLASH = str(_ASSETS / "icon-flash.png")  # brief green pulse on click
 ICON_LARGE_DARK = str(_ASSETS / "icon-large-dark.png")
 ICON_LARGE_LIGHT = str(_ASSETS / "icon-large-light.png")
+
+# Duration of the green flash after a click is observed (seconds).
+FLASH_DURATION = 0.45
 
 LOG_OUT = Path.home() / "Library" / "Logs" / "yes2all" / "yes2all.out.log"
 
@@ -96,10 +102,14 @@ class Yes2AllApp(rumps.App):
         self.interval: float = cfg.get("interval", 0.5)
         self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
 
-        self.start_item = rumps.MenuItem("Start", callback=self.on_start)
-        self.stop_item = rumps.MenuItem("Stop", callback=self.on_stop)
+        self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
         self.sweep_item = rumps.MenuItem("Sweep inactive tabs", callback=self.on_toggle_sweep)
         self.sweep_item.state = 1 if self.sweep_tabs else 0
+
+        # Flash state: when the watcher reports a click, briefly swap the
+        # menubar icon to a green check.
+        self._flash_until: float = 0.0
+        self._last_total: int = sum(_state.read_counts().values())
 
         # One checkbox per known port, grouped under a "Ports" submenu.
         # Label is detected live from each port's /json/version endpoint.
@@ -114,14 +124,13 @@ class Yes2AllApp(rumps.App):
             ports_menu.add(mi)
         ports_menu.add(rumps.separator)
         ports_menu.add(rumps.MenuItem("Add Port…", callback=self.on_add_port))
-
+        ports_menu.add(rumps.MenuItem("Reset counters", callback=self.on_reset_counters))
         self.interval_item = rumps.MenuItem(
             self._interval_title(), callback=self.on_set_interval
         )
 
         self.menu = [
-            self.start_item,
-            self.stop_item,
+            self.toggle_item,
             None,
             ports_menu,
             self.interval_item,
@@ -139,11 +148,24 @@ class Yes2AllApp(rumps.App):
     def _tick(self, _: object) -> None:
         self._refresh_status()
 
+    @rumps.timer(0.25)
+    def _flash_tick(self, _: object) -> None:
+        total = sum(_state.read_counts().values())
+        now = time.monotonic()
+        if total > self._last_total:
+            self._last_total = total
+            self._flash_until = now + FLASH_DURATION
+            self.icon = ICON_FLASH
+            return
+        if self._flash_until and now >= self._flash_until:
+            self._flash_until = 0.0
+            self.icon = _menu_icon(_is_loaded())
+
     def _refresh_status(self) -> None:
         loaded = _is_loaded()
-        self.icon = _menu_icon(loaded)
-        self.start_item.set_callback(None if loaded else self.on_start)
-        self.stop_item.set_callback(self.on_stop if loaded else None)
+        if not self._flash_until:
+            self.icon = _menu_icon(loaded)
+        self.toggle_item.title = "Stop" if loaded else "Start"
         # Re-hydrate from plist so CLI-driven changes (ports/interval/sweep)
         # are reflected the next time the menu reinstalls the watcher.
         cfg = svc.read_installed_args()
@@ -161,7 +183,9 @@ class Yes2AllApp(rumps.App):
     def _port_label(self, prt: int, default_name: str) -> str:
         detected = _detect_app(prt)
         name = detected or f"{default_name} (offline)"
-        return f"{name} ({prt})"
+        n = _state.read_counts().get(prt, 0)
+        suffix = f": {n} approved" if n else ""
+        return f"{name} ({prt}){suffix}"
 
     # ----- actions -------------------------------------------------------
     def _make_port_toggle(self, prt: int):
@@ -188,6 +212,12 @@ class Yes2AllApp(rumps.App):
         return _cb
 
     # ----- actions -------------------------------------------------------
+    def on_toggle(self, _: object) -> None:
+        if _is_loaded():
+            self.on_stop(None)
+        else:
+            self.on_start(None)
+
     def on_start(self, _: object) -> None:
         try:
             svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs)
@@ -279,6 +309,11 @@ class Yes2AllApp(rumps.App):
         else:
             rumps.notification("Yes2All", "Port added",
                                f"will watch {self.ports} once started")
+        self._refresh_status()
+
+    def on_reset_counters(self, _: object) -> None:
+        _state.write_counts({})
+        self._last_total = 0
         self._refresh_status()
 
     def on_set_interval(self, _: object) -> None:
