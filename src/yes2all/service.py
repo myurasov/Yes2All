@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """Background service management for Yes2All (macOS launchd, Linux systemd --user)."""
 from __future__ import annotations
 

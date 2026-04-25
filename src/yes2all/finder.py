@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """Locate (and optionally click) the agent-tool approval 'Run' button in Cursor / VS Code."""
 from __future__ import annotations
 

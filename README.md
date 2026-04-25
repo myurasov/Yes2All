@@ -110,3 +110,9 @@ Yes2All connects to the editor's CDP WebSocket, evaluates JavaScript on each pag
 1. **Cursor tool-call buttons** — `div.composer-run-button` and `button.ui-shell-tool-call__run-btn`
 2. **VS Code chat-question carousels** — `div.chat-question-carousel-container` with option selection + submit
 3. **VS Code chat-confirmation widgets** — `div.chat-confirmation-widget-container` with Allow/Skip buttons
+
+## License
+
+Copyright 2026 Mikhail Yurasov \<me@yurasov.me\>
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """Cross-process state shared between the watcher and menu-bar app.
 
 Currently just a per-port counter of how many approval clicks the watcher has

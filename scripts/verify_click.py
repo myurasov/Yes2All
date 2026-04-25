@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end verification: inject a synthetic approval button into the live
 editor, run the click path, and confirm the click handler fired.
 

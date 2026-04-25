@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """Render a clean SF Symbols-style checkmark for the Yes2All app icon.
 
   * `icon-dark.png` / `icon-dark@2x.png`  — black checkmark on transparent

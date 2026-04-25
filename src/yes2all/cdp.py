@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """Minimal Chrome DevTools Protocol client over WebSocket."""
 from __future__ import annotations
 

@@ -1,3 +1,6 @@
+# Copyright 2026 Mikhail Yurasov <me@yurasov.me>
+# SPDX-License-Identifier: Apache-2.0
+
 """macOS menu-bar app to start/stop the Yes2All background watcher.
 
 Uses `rumps`. Run with `yes2all menubar`.
