@@ -1,0 +1,24 @@
+[project]
+name = "yes2all"
+version = "0.0.1"
+description = "Auto-approve agent tool prompts in Cursor / VS Code via CDP."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "websockets>=13",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rumps>=0.4 ; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+yes2all = "yes2all.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yes2all"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/yes2all/assets" = "yes2all/assets"

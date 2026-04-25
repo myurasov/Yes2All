@@ -1,0 +1,11 @@
+"Yes2All"
+
+I want to create a tool that will connect to Cursor and Visual Studion Code via protocol exposed by "--remote-debugging-port" switch and auto-approve all (or selected) agent tool usage.
+
+It should utilize the following technology stack: python 3.12, uv, uv.lock, pyproject.toml.
+
+It should be installable as a long-running background process on Mac/Linux or windows.
+
+It should include capabilities to for debugging so that new way editors render approval buttons with can be discovered.
+
+It should have an agentic-friendly setup so can be developed and tested autonomously by AI agents.
