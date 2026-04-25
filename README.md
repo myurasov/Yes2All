@@ -26,9 +26,9 @@ cd Yes2All
 uv sync
 ```
 
-## Quick start
+## Quick start (macOS)
 
-### 1. Launch your editor with a debugging port
+### 1. Launch your editors with debugging ports
 
 ```sh
 # Cursor
@@ -38,20 +38,21 @@ uv sync
 code --remote-debugging-port=9333
 ```
 
-### 2. Verify connectivity
+### 2. Start the menu-bar app
 
 ```sh
-uv run yes2all targets --port 9222         # list CDP targets
-uv run yes2all probe   --port 9222         # find approval buttons
-uv run yes2all probe   --port 9222 --click # click the first match
+uv run yes2all menubar
 ```
 
-### 3. Run the watcher
+A ✓ icon appears in the menu bar. Click it → **Start** to begin auto-approving. Use the **Ports** submenu to enable Cursor (9222) and/or VS Code (9333).
+
+### 3. Auto-start at login
 
 ```sh
-# Foreground — polls both editors, sweeps inactive Cursor tabs
-uv run yes2all watch --port 9222 --port 9333 --interval 0.5
+uv run yes2all service install-menubar
 ```
+
+The menu-bar app will now launch automatically on every login. Remove with `uv run yes2all service uninstall-menubar`.
 
 ## Usage
 
