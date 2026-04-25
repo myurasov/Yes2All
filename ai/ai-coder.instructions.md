@@ -34,13 +34,13 @@ Project-specific directions captured from the user. Update this file whenever th
 ## Daemon
 
 - macOS launchd label `com.yes2all.watcher`, plist at `~/Library/LaunchAgents/`. Logs at `~/Library/Logs/yes2all/yes2all.{out,err}.log`.
-- Reload after code changes: `uv run yes2all service uninstall && uv run yes2all service install --port 9222 --interval 1.0`.
+- Reload after code changes: `uv run yes2all service uninstall && uv run yes2all service install --port 9222 --port 9333 --interval 1`.
 - Recommended interval ≥1.0s when sweep is on (each inactive tab adds ~1.5s to a poll cycle).
 
 ## Service install flags
 
-- `uv run yes2all service install --port 9222 --interval 0.5` — default; sweeps inactive tabs.
-- `uv run yes2all service install --port 9222 --interval 0.5 --no-sweep-tabs` — foreground tab only (no tab switching).
+- `uv run yes2all service install --port 9222 --port 9333 --interval 1` — default; sweeps inactive tabs.
+- `uv run yes2all service install --port 9222--port 9333 --interval 1 --no-sweep-tabs` — foreground tab only (no tab switching).
 - `--sweep-tabs/--no-sweep-tabs` is persisted into the launchd plist / systemd unit's `ExecStart`. To change mode, `service uninstall` then reinstall.
 
 ## New approval button variant (Cursor newer builds)
@@ -113,6 +113,10 @@ Project-specific directions captured from the user. Update this file whenever th
 - Menubar title is back to plain text glyphs (`✓` / `○`) — no PNG icon next to it.
 - About dialog uses a theme-aware large icon: `icon-large-dark.png` (black) on light system theme, `icon-large-light.png` (white) on dark system theme. Detection via `defaults read -g AppleInterfaceStyle`.
 
+## User workflow note (2026-04-25)
+
+- When asked how to start with the macOS menu bar, provide: `uv sync` then `uv run yes2all menubar` (foreground). For auto-start at login: `uv run yes2all service install-menubar`.
+
 ## Icon design v2 (Y2A + checkmark)
 
 - Stylized "Y2A" wordmark inside a rounded square, with a bold checkmark swoosh framing the wordmark from below (left tail dips beneath, right tail rises through the right side).
@@ -143,3 +147,11 @@ Project-specific directions captured from the user. Update this file whenever th
 - Menubar glyph shrunk via internal padding (`MENU_PAD=0.18`) so it doesn't crowd the menu bar.
 - Stopped/unloaded state shows a hairline open circle instead of the checkmark; new assets `icon-off-{dark,light}{,@2x}.png`.
 - `menubar._menu_icon(loaded)` picks the right of four icons based on `(loaded, system_is_dark)`.
+
+## Watcher port gotcha
+
+- The watcher only polls ports passed via `--port`. If a click handler "doesn't fire" for VS Code, first verify `9333` is in the installed launchd plist's `ProgramArguments` (or in the menubar's "Ports" submenu). Default install command: `uv run yes2all service install --port 9222 --port 9333 --interval 0.5`.
+
+## Carousel auto-pick fallback
+
+- `CLICK_CHAT_QUESTION_JS` first tries to match a positive verb (`yes|allow|approve|accept|run|continue|confirm|ok`); if none of the options match, it falls back to the first non-negative option (so generic carousels like `Single confirmation, then run all 1000` / `Per-run confirmation dialog` auto-submit option #1).
