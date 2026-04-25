@@ -55,7 +55,7 @@ Project-specific directions captured from the user. Update this file whenever th
 - LaunchAgent label `com.yes2all.menubar`, plist at `~/Library/LaunchAgents/`. `LimitLoadToSessionType=Aqua` so it only runs in the GUI session.
 - Install/remove auto-start: `uv run yes2all service install-menubar` / `uninstall-menubar`. Logs at `~/Library/Logs/yes2all/menubar.{out,err}.log`.
 - Title icon: `✓` watcher loaded, `○` not loaded. Polls `launchctl list` every 3s.
-- Menu: Start / Stop / Sweep inactive tabs (toggle, reinstalls watcher) / Open log / Reveal log / Quit.
+- Menu: Start / Stop / Sweep inactive tabs (toggle, reinstalls watcher) / Open log / Quit.
 
 ## Hide Python from Dock
 

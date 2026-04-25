@@ -136,7 +136,6 @@ class Yes2AllApp(rumps.App):
             self.interval_item,
             self.sweep_item,
             rumps.MenuItem("Tail log in Terminal", callback=self.on_open_log),
-            rumps.MenuItem("Reveal log in Finder", callback=self.on_reveal_log),
             None,
             rumps.MenuItem("About Yes2All", callback=self.on_about),
             rumps.MenuItem("Quit Yes2All", callback=self.on_quit),
@@ -259,9 +258,6 @@ class Yes2AllApp(rumps.App):
         script = f'tell application "Terminal" to do script "tail -f {LOG_OUT}"\n' \
                  f'tell application "Terminal" to activate'
         subprocess.run(["osascript", "-e", script], check=False)
-
-    def on_reveal_log(self, _: object) -> None:
-        subprocess.run(["open", "-R", str(LOG_OUT)], check=False)
 
     def _interval_title(self) -> str:
         return f"Interval: {self.interval}s\u2026"
