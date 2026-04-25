@@ -16,6 +16,7 @@ from .finder import (
     FIND_APPROVAL_BUTTONS_JS,
     SWEEP_TABS_AND_CLICK_JS,
 )
+from . import state as _state
 from . import service as svc
 
 app = typer.Typer(add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code.")
@@ -90,16 +91,16 @@ def watch(
             for r in data.get("results", []):
                 if r.get("clicked"):
                     b = r["clicked"]
+                    tool = b.get("tool") or "?"
                     print(f"[{ts}] CLICKED on '{p_title[:40]}' tab={r['tab'][:40]!r} "
-                          f"<{b['tag']}> rect={b['rect']} "
-                          f"classes={b['classes'][:60]!r}", flush=True)
+                          f"tool={tool!r} <{b['tag']}> rect={b['rect']}", flush=True)
             return int(n)
         # Active-tab-only payload: {count, buttons}.
         if data.get("count"):
             b = data["buttons"][0]
+            tool = b.get("tool") or "?"
             print(f"[{ts}] CLICKED on '{p_title[:40]}' (active) "
-                  f"<{b['tag']}> rect={b['rect']} "
-                  f"classes={b['classes'][:60]!r}", flush=True)
+                  f"tool={tool!r} <{b['tag']}> rect={b['rect']}", flush=True)
             return 1
         return 0
 
@@ -141,6 +142,7 @@ def watch(
                         ts = time.strftime("%H:%M:%S")
                         for r in data_cq.get("results", []):
                             print(f"[{ts}] CHAT-QUESTION on '{p_label[:50]}' "
+                                  f"question={r.get('question')!r} "
                                   f"option={r.get('label')!r} via={r.get('how')}", flush=True)
                     cc_n = int(data_cc.get("count", 0) or 0)
                     if cc_n:
@@ -149,7 +151,9 @@ def watch(
                             print(f"[{ts}] CHAT-CONFIRMATION on '{p_label[:50]}' "
                                   f"button={r.get('label')!r} dialog={r.get('dialog')!r}", flush=True)
                     if (clicked or cq_n or cc_n) and once:
+                        _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
                         return
+                    _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
             await asyncio.sleep(interval)
     asyncio.run(_run())
 
