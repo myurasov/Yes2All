@@ -89,6 +89,21 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     return null;
   }
 
+  // Walk up looking for the Cursor tool-call container and grab a short
+  // human label (e.g. "Run terminal command", "Edit file foo.py").
+  function toolHint(el) {
+    let cur = el;
+    for (let i = 0; i < 12 && cur; i++) {
+      if (cur.classList && cur.classList.contains("composer-tool-call-container")) {
+        // Header is typically the first line of the container's text.
+        const t = ((cur.innerText || cur.textContent) || "").trim();
+        const first = t.split(/\r?\n/)[0] || "";
+        return first.slice(0, 120);
+      }
+      cur = cur.parentElement;
+    }
+    return null;
+  }
   function describe(el) {
     const r = el.getBoundingClientRect();
     return {
@@ -97,6 +112,7 @@ FIND_APPROVAL_BUTTONS_JS = r"""
       role: el.getAttribute("role") || null,
       ariaLabel: el.getAttribute("aria-label") || null,
       classes: (el.className && el.className.toString) ? el.className.toString().slice(0, 200) : "",
+      tool: toolHint(el),
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
       cx: Math.round(r.x + r.width / 2),
       cy: Math.round(r.y + r.height / 2),
@@ -165,16 +181,31 @@ CLICK_CHAT_QUESTION_JS = r"""
     const items = Array.from(c.querySelectorAll('.chat-question-list-item[role="option"]'));
     if (items.length === 0) continue;
 
-    // Pick a positive option; never pick a negative one.
+    // Pick the first non-negative option. Prefer one matching a positive
+    // verb; otherwise fall back to the first item that isn't an explicit
+    // negative (so generic carousels like "Single confirmation, then run
+    // all 1000" / "Per-run confirmation dialog" still auto-submit option #1).
     let chosen = null;
     for (const it of items) {
       const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
       if (NEGATIVE.test(lbl)) continue;
       if (POSITIVE.test(lbl)) { chosen = it; break; }
     }
+    if (!chosen) {
+      for (const it of items) {
+        const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
+        if (NEGATIVE.test(lbl)) continue;
+        chosen = it; break;
+      }
+    }
     if (!chosen) continue;
 
     const label = (chosen.querySelector(".chat-question-list-label")?.innerText || "").trim().slice(0, 80);
+
+    // First non-empty line of the carousel container is usually the question
+    // (e.g. "Run command in terminal?").
+    const containerText = ((c.innerText || c.textContent) || "").trim();
+    const question = (containerText.split(/\r?\n/).find(s => s.trim().length) || "").trim().slice(0, 120);
 
     // 1) Select the option (real mousedown/mouseup/click).
     if (!chosen.classList.contains("selected")) realClick(chosen);
@@ -196,7 +227,7 @@ CLICK_CHAT_QUESTION_JS = r"""
       how = "cmd-enter";
     }
 
-    results.push({label, how});
+    results.push({label, how, question});
   }
   return JSON.stringify({url: location.href, count: results.length, results});
 })()
@@ -308,12 +339,25 @@ SWEEP_TABS_AND_CLICK_JS = r"""
     el.dispatchEvent(new MouseEvent("mouseup", opts));
     el.dispatchEvent(new MouseEvent("click", opts));
   }
+  function toolHint(el) {
+    let cur = el;
+    for (let i = 0; i < 12 && cur; i++) {
+      if (cur.classList && cur.classList.contains("composer-tool-call-container")) {
+        const t = ((cur.innerText || cur.textContent) || "").trim();
+        const first = t.split(/\r?\n/)[0] || "";
+        return first.slice(0, 120);
+      }
+      cur = cur.parentElement;
+    }
+    return null;
+  }
   function describe(el) {
     const r = el.getBoundingClientRect();
     return {
       tag: el.tagName.toLowerCase(),
       text: textOf(el).slice(0, 80),
       classes: (el.className && el.className.toString) ? el.className.toString().slice(0, 200) : "",
+      tool: toolHint(el),
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
     };
   }
