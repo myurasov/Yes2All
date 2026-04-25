@@ -438,3 +438,88 @@ SWEEP_TABS_AND_CLICK_JS = r"""
 })()
 """
 
+
+# Codex (OpenAI) agent prompt inside a VS Code webview. The prompt renders as
+# radio-button options (`button[role=radio][type=submit]`) inside a nested
+# `#active-frame` iframe, with a separate "Submit" button and a "Skip" button.
+#
+# This JS is meant to run on the **iframe** CDP target (the outer webview
+# frame). It accesses the inner `#active-frame` and:
+# 1. Finds radio buttons whose aria-label starts with a positive verb.
+# 2. Clicks the first match to select it.
+# 3. Clicks the Submit button to confirm.
+CLICK_CODEX_PROMPT_JS = r"""
+(() => {
+  const POSITIVE = /^yes\b/i;
+  const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
+
+  function fire(el, type, init) {
+    el.dispatchEvent(new MouseEvent(type, Object.assign(
+      {bubbles:true, cancelable:true, view:el.ownerDocument.defaultView, button:0}, init||{})));
+  }
+  function realClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width/2, y = r.y + r.height/2;
+    const o = {clientX:x, clientY:y};
+    fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+  }
+
+  // Navigate into the nested inner iframe if present.
+  let doc = document;
+  const inner = document.querySelector('#active-frame');
+  if (inner) {
+    try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {}
+  }
+
+  // Find radio-button options.
+  const radios = Array.from(doc.querySelectorAll('button[role="radio"]'));
+  if (radios.length === 0)
+    return JSON.stringify({url: location.href, count: 0, results: []});
+
+  // Pick first positive option.
+  let chosen = null;
+  for (const r of radios) {
+    const aria = (r.getAttribute("aria-label") || "").trim();
+    const text = (r.innerText || r.textContent || "").trim();
+    const label = aria || text;
+    if (NEGATIVE.test(label)) continue;
+    if (POSITIVE.test(label)) { chosen = r; break; }
+  }
+  if (!chosen)
+    return JSON.stringify({url: location.href, count: 0, results: []});
+
+  const chosenLabel = (chosen.getAttribute("aria-label") || chosen.innerText || "").trim().slice(0, 120);
+
+  // Click the radio to select it.
+  realClick(chosen);
+
+  // Find and click the Submit button.
+  const allButtons = Array.from(doc.querySelectorAll('button'));
+  let submitBtn = null;
+  for (const b of allButtons) {
+    const txt = (b.innerText || b.textContent || "").trim();
+    if (/^submit\b/i.test(txt)) { submitBtn = b; break; }
+  }
+  let how = "radio-only";
+  if (submitBtn) {
+    realClick(submitBtn);
+    how = "radio+submit";
+  }
+
+  // Collect context: the command or question being approved.
+  let question = "";
+  // Look for a div[role=button] with a command-like text (prefixed with $).
+  const cmdDivs = doc.querySelectorAll('div[role="button"]');
+  for (const d of cmdDivs) {
+    const t = (d.innerText || "").trim();
+    if (t.startsWith("$")) { question = t.slice(0, 200); break; }
+  }
+
+  return JSON.stringify({
+    url: location.href,
+    count: 1,
+    results: [{label: chosenLabel, how, question}]
+  });
+})()
+"""
+

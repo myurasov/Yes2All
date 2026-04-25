@@ -15,6 +15,7 @@ from .cdp import CDPSession, list_pages, list_targets
 from .finder import (
     CLICK_CHAT_CONFIRMATION_JS,
     CLICK_CHAT_QUESTION_JS,
+    CLICK_CODEX_PROMPT_JS,
     CLICK_FIRST_APPROVAL_JS,
     FIND_APPROVAL_BUTTONS_JS,
     SWEEP_TABS_AND_CLICK_JS,
@@ -157,6 +158,33 @@ def watch(
                         _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
                         return
                     _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
+                # Scan iframe targets for Codex prompts (webview-hosted UI).
+                try:
+                    all_targets = await list_targets(port=prt)
+                except Exception:
+                    all_targets = []
+                for t in all_targets:
+                    if t.type != "iframe" or not t.ws_url:
+                        continue
+                    try:
+                        async with CDPSession(t.ws_url) as s:
+                            raw_cx = await s.evaluate(CLICK_CODEX_PROMPT_JS)
+                    except Exception:
+                        continue
+                    try:
+                        data_cx = json.loads(raw_cx) if isinstance(raw_cx, str) else raw_cx
+                    except Exception:
+                        data_cx = {}
+                    cx_n = int(data_cx.get("count", 0) or 0)
+                    if cx_n:
+                        ts = time.strftime("%H:%M:%S")
+                        for r in data_cx.get("results", []):
+                            print(f"[{ts}] CODEX-PROMPT on '{prt}/{t.title[:50]}' "
+                                  f"option={r.get('label')!r} "
+                                  f"cmd={r.get('question')!r} via={r.get('how')}", flush=True)
+                        _state.add_clicks(prt, cx_n)
+                        if once:
+                            return
             await asyncio.sleep(interval)
     asyncio.run(_run())
 

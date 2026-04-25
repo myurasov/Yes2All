@@ -5,7 +5,7 @@ Auto-approve agent tool-call prompts in **Cursor** and **VS Code** (Copilot Chat
 ## Features
 
 - **Auto-clicks** Run / Allow / Approve / Accept / Yes buttons in Cursor and VS Code Copilot Chat — so agentic workflows run unattended.
-- **Multiple prompt formats** — handles Cursor's composer tool-call buttons, VS Code's chat-question carousels, and chat-confirmation (Allow/Skip) widgets.
+- **Multiple prompt formats** — handles Cursor's composer tool-call buttons, VS Code's chat-question carousels, chat-confirmation (Allow/Skip) widgets, and Codex agent prompts.
 - **Multi-port** — poll Cursor (9222) and VS Code (9333) simultaneously in a single watcher process.
 - **Inactive tab sweep** — switches through Cursor chat tabs to find pending approvals in background conversations, then restores the original tab.
 - **macOS menu-bar app** — checkmark icon in the menu bar with Start/Stop, port toggles, interval config, and a green flash when a click fires.
@@ -105,11 +105,12 @@ Logs are written to `~/Library/Logs/yes2all/` on macOS.
 
 ## How it works
 
-Yes2All connects to the editor's CDP WebSocket, evaluates JavaScript on each page target to locate approval buttons by class-name fragments and verb matching, and dispatches real mouse events (mousedown → mouseup → click) to accept them. It handles three distinct prompt types:
+Yes2All connects to the editor's CDP WebSocket, evaluates JavaScript on each page and iframe target to locate approval buttons by class-name fragments and verb matching, and dispatches real mouse events (mousedown → mouseup → click) to accept them. It handles four distinct prompt types:
 
 1. **Cursor tool-call buttons** — `div.composer-run-button` and `button.ui-shell-tool-call__run-btn`
 2. **VS Code chat-question carousels** — `div.chat-question-carousel-container` with option selection + submit
 3. **VS Code chat-confirmation widgets** — `div.chat-confirmation-widget-container` with Allow/Skip buttons
+4. **Codex agent prompts** — `button[role=radio]` options inside a webview iframe, with Submit confirmation
 
 ## License
 

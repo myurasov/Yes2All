@@ -155,3 +155,10 @@ Project-specific directions captured from the user. Update this file whenever th
 ## Carousel auto-pick fallback
 
 - `CLICK_CHAT_QUESTION_JS` first tries to match a positive verb (`yes|allow|approve|accept|run|continue|confirm|ok`); if none of the options match, it falls back to the first non-negative option (so generic carousels like `Single confirmation, then run all 1000` / `Per-run confirmation dialog` auto-submit option #1).
+
+## Codex (OpenAI) agent prompts
+
+- VS Code Codex extension (`openai.chatgpt`) renders its approval UI inside a webview iframe, not in the main page DOM.
+- The prompt is inside a nested `#active-frame` iframe within the webview. Radio options are `button[role="radio"][type="submit"]` with `aria-label` like "Yes", "Yes, and don't ask again for commands that start with …". A separate "Submit ⏎" button confirms, and a "Skip" button declines.
+- Handler: `CLICK_CODEX_PROMPT_JS` in `finder.py`. Runs on **iframe** CDP targets (not page targets). Selects the first radio whose `aria-label` starts with "Yes", then clicks Submit.
+- Watcher loop now also iterates `list_targets()` for iframe-type targets on each port per tick and evaluates `CLICK_CODEX_PROMPT_JS` on each.
