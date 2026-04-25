@@ -354,7 +354,9 @@ class Yes2AllApp(rumps.App):
             f"Watcher: {'running' if loaded else 'stopped'}\n"
             f"Ports:   {ports_str}\n"
             f"Interval: {self.interval}s\n"
-            f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}"
+            f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n\n"
+            f"© Mikhail Yurasov <me@yurasov.me>\n"
+            f"Apache License 2.0"
         )
         rumps.alert(title="About Yes2All", message=msg, ok="OK",
                     icon_path=ICON_LARGE_LIGHT if _system_is_dark() else ICON_LARGE_DARK)
