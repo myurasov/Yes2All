@@ -1,24 +1,42 @@
 # Yes2All
 
-Auto-approve agent tool-call prompts in **Cursor** and **VS Code** (Copilot Chat) via the Chrome DevTools Protocol exposed by `--remote-debugging-port`.
+Auto-approve agent tool-call prompts in **Cursor**, **VS Code** (Copilot Chat, Claude, Codex) via the Chrome DevTools Protocol.
 
-## Features
+Connects to your editor's CDP WebSocket, finds pending approval buttons by class-name and verb matching, and dispatches real mouse events to accept them — so agentic workflows run unattended.
 
-- **Auto-clicks** Run / Allow / Approve / Accept / Yes buttons in Cursor and VS Code Copilot Chat — so agentic workflows run unattended.
-- **Multiple prompt formats** — handles Cursor's composer tool-call buttons, VS Code's chat-question carousels, chat-confirmation (Allow/Skip) widgets, and Codex agent prompts.
-- **Multi-port** — poll Cursor (9222) and VS Code (9333) simultaneously in a single watcher process.
-- **Inactive tab sweep** — switches through Cursor chat tabs to find pending approvals in background conversations, then restores the original tab.
-- **macOS menu-bar app** — checkmark icon in the menu bar with Start/Stop, port toggles, interval config, and a green flash when a click fires.
-- **Background service** — installs as a macOS LaunchAgent (launchd) or Linux systemd user unit that starts on login and auto-restarts.
-- **Diagnostic tools** — `targets` and `probe` commands for discovering CDP pages and approval-button selectors.
+- [TL;DR](#tldr)
+- [Installation](#installation)
+- [Supported Prompts](#supported-prompts)
+- [CLI Reference](#cli-reference)
+- [Logs and Config](#logs-and-config)
+- [License](#license)
 
-## Requirements
+## TL;DR
 
-- Python 3.12, [uv](https://docs.astral.sh/uv/)
-- macOS or Linux
-- Editor launched with `--remote-debugging-port`
+**macOS:**
+
+```sh
+git clone https://github.com/myurasov/Yes2All.git && cd Yes2All
+uv sync && ./install-macos.sh
+```
+
+**Linux:**
+
+```sh
+git clone https://github.com/myurasov/Yes2All.git && cd Yes2All
+uv sync && ./install-linux.sh
+```
+
+**Windows:**
+
+```cmd
+git clone https://github.com/myurasov/Yes2All.git && cd Yes2All
+uv sync && install-win.bat
+```
 
 ## Installation
+
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). Editors must be launched with `--remote-debugging-port`.
 
 ```sh
 git clone https://github.com/myurasov/Yes2All.git
@@ -26,94 +44,60 @@ cd Yes2All
 uv sync
 ```
 
-## Quick start (macOS)
+Then use the interactive installer for your platform:
 
-### 1. Launch your editors with debugging ports
+| Platform | Script | Notes |
+|---|---|---|
+| macOS | `./install-macos.sh` | launchd service + menu-bar app, press 0 for quick-install |
+| Linux | `./install-linux.sh` | systemd user service |
+| Windows | `install-win.bat` | foreground mode only |
+
+Or run manually on any platform:
 
 ```sh
-# Cursor
-/Applications/Cursor.app/Contents/MacOS/Cursor --remote-debugging-port=9222
-
-# VS Code
+# Launch editor with a CDP port
 code --remote-debugging-port=9333
+
+# Run in foreground
+uv run yes2all watch --port 9333
+
+# Or install as a background service (macOS / Linux)
+uv run yes2all service install --port 9222 --port 9333
 ```
 
-### 2. Start the menu-bar app
+## Supported Prompts
 
-```sh
-uv run yes2all menubar
-```
+| Editor | Prompt type | What gets clicked |
+|---|---|---|
+| Cursor | Tool-call buttons | Run / Allow / Approve / Accept / Yes |
+| VS Code | Chat-question carousel | First affirmative option + Submit |
+| VS Code | Chat-confirmation widget | Allow button |
+| VS Code | Codex agent prompts | "Yes" radio + Submit (webview iframe) |
+| VS Code | Claude Code prompts | Affirmative button or "Yes" radio + Submit (webview iframe) |
 
-A ✓ icon appears in the menu bar. Click it → **Start** to begin auto-approving. Use the **Ports** submenu to enable Cursor (9222) and/or VS Code (9333).
+## CLI Reference
 
-### 3. Auto-start at login
+| Command | Description | Platform |
+|---|---|---|
+| `yes2all watch --port PORT [--port …] [--interval N] [--countdown N]` | Run y2a-service in foreground | All |
+| `yes2all targets --port PORT` | List CDP targets on a port | All |
+| `yes2all probe --port PORT [--click]` | Find (and optionally click) approval buttons | All |
+| `yes2all service install --port PORT [--interval N] [--no-sweep-tabs]` | Install y2a-service (launchd / systemd) | macOS, Linux |
+| `yes2all service uninstall` | Remove y2a-service | macOS, Linux |
+| `yes2all service status` | Check y2a-service status | macOS, Linux |
+| `yes2all menubar` | Run y2a-menubar in foreground | macOS |
+| `yes2all service install-menubar` | Auto-start y2a-menubar at login | macOS |
+| `yes2all service uninstall-menubar` | Remove y2a-menubar auto-start | macOS |
 
-```sh
-uv run yes2all service install-menubar
-```
+**y2a-menubar** is a native macOS menu-bar app built with [rumps](https://github.com/jaredks/rumps). Icon: **✓** when running, **○** when stopped. Flashes green on each approval click. Menus: Start/Stop, Watched Ports, Settings, Launch w/CDP, About.
 
-The menu-bar app will now launch automatically on every login. Remove with `uv run yes2all service uninstall-menubar`.
+## Logs and Config
 
-## Usage
-
-### CLI commands
-
-| Command | Description |
-|---|---|
-| `yes2all targets --port PORT` | List all CDP targets on the given port |
-| `yes2all probe --port PORT [--click]` | Find (and optionally click) approval buttons |
-| `yes2all watch --port PORT [--port PORT2] [--interval N] [--no-sweep-tabs]` | Poll and auto-click in a loop |
-| `yes2all menubar` | Launch the macOS menu-bar app (foreground) |
-| `yes2all service install --port PORT [--port PORT2] [--interval N] [--no-sweep-tabs]` | Install watcher as a background service |
-| `yes2all service uninstall` | Stop and remove the watcher service |
-| `yes2all service status` | Check if the watcher service is loaded |
-| `yes2all service install-menubar` | Auto-start the menu-bar app at login |
-| `yes2all service uninstall-menubar` | Remove menu-bar auto-start |
-
-### macOS menu-bar app
-
-```sh
-# Run once (foreground)
-uv run yes2all menubar
-
-# Auto-start at login
-uv run yes2all service install-menubar
-```
-
-The menu-bar icon shows a ✓ when the watcher is loaded and ○ when stopped. It flashes green briefly whenever an approval is clicked. The menu provides:
-
-- **Start / Stop** — toggle the background watcher
-- **Ports** — enable/disable Cursor (9222) and VS Code (9333) with live status detection
-- **Cycle Cursor tabs** — toggle scanning of background Cursor chat tabs
-- **Interval** — adjust the poll frequency
-- **Open log** — view watcher output
-
-### Background service
-
-```sh
-# Install and start (both editors, 0.5s poll, sweep on)
-uv run yes2all service install --port 9222 --port 9333 --interval 0.5
-
-# Check status
-uv run yes2all service status
-
-# Stop and remove
-uv run yes2all service uninstall
-```
-
-Logs are written to `~/Library/Logs/yes2all/` on macOS.
-
-## How it works
-
-Yes2All connects to the editor's CDP WebSocket, evaluates JavaScript on each page and iframe target to locate approval buttons by class-name fragments and verb matching, and dispatches real mouse events (mousedown → mouseup → click) to accept them. It handles four distinct prompt types:
-
-1. **Cursor tool-call buttons** — `div.composer-run-button` and `button.ui-shell-tool-call__run-btn`
-2. **VS Code chat-question carousels** — `div.chat-question-carousel-container` with option selection + submit
-3. **VS Code chat-confirmation widgets** — `div.chat-confirmation-widget-container` with Allow/Skip buttons
-4. **Codex agent prompts** — `button[role=radio]` options inside a webview iframe, with Submit confirmation
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Logs | `~/Library/Logs/yes2all/` | `journalctl --user -u com.yes2all.watcher` | stdout |
+| Config | `~/Library/Application Support/yes2all/` | `~/.local/share/yes2all/` | `%APPDATA%/yes2all/` |
 
 ## License
 
-Copyright 2026 Mikhail Yurasov \<me@yurasov.me\>
-
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Copyright 2026 Mikhail Yurasov \<<me@yurasov.me>\> — [Apache 2.0](LICENSE)
