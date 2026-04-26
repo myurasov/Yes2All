@@ -12,6 +12,8 @@ from typing import Annotated
 
 import typer
 
+from . import service as svc
+from . import state as _state
 from .cdp import CDPSession, list_pages, list_targets
 from .finder import (
     CLICK_CHAT_CONFIRMATION_JS,
@@ -25,12 +27,8 @@ from .finder import (
     countdown_codex_js,
     countdown_js,
 )
-from . import state as _state
-from . import service as svc
 
-app = typer.Typer(
-    add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code."
-)
+app = typer.Typer(add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code.")
 service_app = typer.Typer(help="Manage the Yes2All background service.")
 app.add_typer(service_app, name="service")
 
@@ -52,9 +50,7 @@ def targets(
 @app.command()
 def probe(
     port: Annotated[int, typer.Option(help="CDP remote-debugging-port")] = 9222,
-    click: Annotated[
-        bool, typer.Option(help="Click the first matching button")
-    ] = False,
+    click: Annotated[bool, typer.Option(help="Click the first matching button")] = False,
 ) -> None:
     """Find approval buttons (Run/Allow/Approve/Accept) on every page target."""
 
@@ -98,23 +94,19 @@ def watch(
         list[int],
         typer.Option("--port", help="CDP remote-debugging-port (repeat for multiple)."),
     ] = [9222],
-    interval: Annotated[float, typer.Option(help="Poll interval (seconds)")] = 0.5,
-    once: Annotated[
-        bool, typer.Option(help="Exit after first successful click")
-    ] = False,
+    interval: Annotated[float, typer.Option(help="Poll interval (seconds)")] = 1,
+    once: Annotated[bool, typer.Option(help="Exit after first successful click")] = False,
     sweep_tabs: Annotated[
         bool,
         typer.Option(
             "--sweep-tabs/--no-sweep-tabs",
-            help="Also activate inactive Cursor chat tabs to find pending approvals (restores original tab afterwards).",
+            help="Cycle inactive Cursor chat tabs to find pending approvals (restores original tab afterwards).",
         ),
-    ] = True,
+    ] = False,
     countdown: Annotated[
         float,
-        typer.Option(
-            help="Seconds to show countdown badge before clicking (0=instant)."
-        ),
-    ] = 0,
+        typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
+    ] = 3,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
     use_countdown = countdown > 0
@@ -144,8 +136,7 @@ def watch(
             b = data["buttons"][0]
             tool = b.get("tool") or "?"
             print(
-                f"[{ts}] CLICKED on '{p_title[:40]}' (active) "
-                f"tool={tool!r} <{b['tag']}> rect={b['rect']}",
+                f"[{ts}] CLICKED on '{p_title[:40]}' (active) tool={tool!r} <{b['tag']}> rect={b['rect']}",
                 flush=True,
             )
             return 1
@@ -174,11 +165,7 @@ def watch(
                             print(f"  [{prt}/{p.title[:40]}] error: {e}", flush=True)
                             continue
                         try:
-                            data_cd = (
-                                json.loads(raw_cd)
-                                if isinstance(raw_cd, str)
-                                else raw_cd
-                            )
+                            data_cd = json.loads(raw_cd) if isinstance(raw_cd, str) else raw_cd
                         except Exception:
                             data_cd = {}
                         cd_n = int(data_cd.get("count", 0) or 0)
@@ -187,8 +174,7 @@ def watch(
                             ts = time.strftime("%H:%M:%S")
                             for r in data_cd.get("clicked", []):
                                 print(
-                                    f"[{ts}] CLICKED (countdown) on '{prt}/{p.title[:40]}' "
-                                    f"text={r.get('text')!r}",
+                                    f"[{ts}] CLICKED (countdown) on '{prt}/{p.title[:40]}' text={r.get('text')!r}",
                                     flush=True,
                                 )
                             _state.add_clicks(prt, cd_n)
@@ -209,19 +195,11 @@ def watch(
                         except Exception:
                             data = {}
                         try:
-                            data_cq = (
-                                json.loads(raw_cq)
-                                if isinstance(raw_cq, str)
-                                else raw_cq
-                            )
+                            data_cq = json.loads(raw_cq) if isinstance(raw_cq, str) else raw_cq
                         except Exception:
                             data_cq = {}
                         try:
-                            data_cc = (
-                                json.loads(raw_cc)
-                                if isinstance(raw_cc, str)
-                                else raw_cc
-                            )
+                            data_cc = json.loads(raw_cc) if isinstance(raw_cc, str) else raw_cc
                         except Exception:
                             data_cc = {}
                         p_label = f"{prt}/{p.title}"
@@ -265,9 +243,7 @@ def watch(
                     except Exception:
                         raw_cx = "{}"
                     try:
-                        data_cx = (
-                            json.loads(raw_cx) if isinstance(raw_cx, str) else raw_cx
-                        )
+                        data_cx = json.loads(raw_cx) if isinstance(raw_cx, str) else raw_cx
                     except Exception:
                         data_cx = {}
                     cx_n = int(data_cx.get("count", 0) or 0)
@@ -277,26 +253,21 @@ def watch(
                         for r in data_cx.get(cx_key, []):
                             label = r.get("text") or r.get("label") or ""
                             print(
-                                f"[{ts}] CODEX-PROMPT on '{prt}/{t.title[:50]}' "
-                                f"option={label!r}",
+                                f"[{ts}] CODEX-PROMPT on '{prt}/{t.title[:50]}' option={label!r}",
                                 flush=True,
                             )
                         _state.add_clicks(prt, cx_n)
                         if once:
                             return
                     # Run Claude handler.
-                    claude_js = (
-                        js_cd_claude if use_countdown else CLICK_CLAUDE_PROMPT_JS
-                    )
+                    claude_js = js_cd_claude if use_countdown else CLICK_CLAUDE_PROMPT_JS
                     try:
                         async with CDPSession(t.ws_url) as s:
                             raw_cl = await s.evaluate(claude_js)
                     except Exception:
                         raw_cl = "{}"
                     try:
-                        data_cl = (
-                            json.loads(raw_cl) if isinstance(raw_cl, str) else raw_cl
-                        )
+                        data_cl = json.loads(raw_cl) if isinstance(raw_cl, str) else raw_cl
                     except Exception:
                         data_cl = {}
                     cl_n = int(data_cl.get("count", 0) or 0)
@@ -306,8 +277,7 @@ def watch(
                         for r in data_cl.get(cl_key, []):
                             label = r.get("text") or r.get("label") or ""
                             print(
-                                f"[{ts}] CLAUDE-PROMPT on '{prt}/{t.title[:50]}' "
-                                f"option={label!r}",
+                                f"[{ts}] CLAUDE-PROMPT on '{prt}/{t.title[:50]}' option={label!r}",
                                 flush=True,
                             )
                         _state.add_clicks(prt, cl_n)
@@ -324,20 +294,18 @@ def service_install(
         list[int],
         typer.Option("--port", help="CDP remote-debugging-port (repeat for multiple)."),
     ] = [9222],
-    interval: Annotated[float, typer.Option(help="Poll interval (seconds)")] = 0.5,
+    interval: Annotated[float, typer.Option(help="Poll interval (seconds)")] = 1,
     sweep_tabs: Annotated[
         bool,
         typer.Option(
             "--sweep-tabs/--no-sweep-tabs",
-            help="Also scan inactive chat tabs (switches tabs briefly).",
+            help="Cycle inactive Cursor chat tabs (switches tabs briefly).",
         ),
-    ] = True,
+    ] = False,
     countdown: Annotated[
         float,
-        typer.Option(
-            help="Seconds to show countdown badge before clicking (0=instant)."
-        ),
-    ] = 0,
+        typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
+    ] = 3,
 ) -> None:
     """Install + start Yes2All as a background service (launchd / systemd --user)."""
     svc.install(
@@ -363,6 +331,11 @@ def service_status() -> None:
 @app.command()
 def menubar() -> None:
     """Run the macOS menu-bar app (foreground). Use `service install-menubar` to auto-start at login."""
+    import sys
+
+    if sys.platform != "darwin":
+        typer.echo("Error: y2a-menubar is macOS-only.", err=True)
+        raise typer.Exit(1)
     from . import menubar as mb
 
     mb.run()
