@@ -62,9 +62,7 @@ class CDPSession:
             await self._ws.close()
             self._ws = None
 
-    async def send(
-        self, method: str, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         assert self._ws is not None, "session not opened"
         msg_id = next(self._ids)
         payload = {"id": msg_id, "method": method, "params": params or {}}
@@ -91,3 +89,18 @@ class CDPSession:
         if ro.get("subtype") == "error":
             raise RuntimeError(f"JS error: {ro.get('description')}")
         return ro.get("value")
+
+    async def type_text(self, text: str) -> None:
+        """Insert *text* at the current focus via CDP ``Input.insertText``."""
+        await self.send("Input.insertText", {"text": text})
+
+    async def press_enter(self) -> None:
+        """Dispatch an Enter key press via CDP ``Input.dispatchKeyEvent``."""
+        common = {
+            "key": "Enter",
+            "code": "Enter",
+            "windowsVirtualKeyCode": 13,
+            "nativeVirtualKeyCode": 13,
+        }
+        await self.send("Input.dispatchKeyEvent", {"type": "keyDown", **common})
+        await self.send("Input.dispatchKeyEvent", {"type": "keyUp", **common})
