@@ -1038,3 +1038,129 @@ CLICK_CODEX_PROMPT_JS = r"""
   });
 })()
 """
+
+
+# ---------------------------------------------------------------------------
+# Text-based confirmation questions in VS Code Copilot Chat.
+#
+# Sometimes the agent asks a yes/no question in plain text (e.g. "shall I
+# proceed?") and waits for the user to type a reply.  There's no button or
+# widget — the user must type into the chat input and press Enter.
+#
+# Detection:
+#   1. The last assistant chat message (`.chat-markdown-part`) ends with "?"
+#      and contains a confirmation phrase (shall I, should I, do you want, etc.)
+#   2. The chat input textbox is empty (user hasn't started typing)
+#   3. A loading/thinking indicator is visible (agent is waiting for input)
+#
+# This JS only *detects* and manages a countdown badge.  The actual typing is
+# done via CDP Input domain methods from Python.
+# ---------------------------------------------------------------------------
+DETECT_CHAT_TEXT_CONFIRM_JS = r"""
+(() => {
+  const CONFIRM_RE = /\b(shall I|should I|do you want|want me to|proceed\??|go ahead|ready to|yes or no)\b/i;
+  const BADGE_ATTR = "data-y2a-text-deadline";
+  const ANSWERED_ATTR = "data-y2a-text-answered";
+  const BADGE_CLS  = "y2a-text-countdown-badge";
+  const DELAY_MS   = __COUNTDOWN_SECS__ * 1000;
+
+  // Walk each chat widget independently so we scope question + editor together.
+  // VS Code Copilot Chat uses .interactive-session as the per-chat container.
+  const sessions = Array.from(document.querySelectorAll(
+    ".interactive-session, .chat-widget, [class*='chat-editor']"
+  ));
+  // Fallback: if no session containers found, treat the whole document as one.
+  const containers = sessions.length > 0 ? sessions : [document];
+
+  for (const container of containers) {
+    const parts = Array.from(container.querySelectorAll(".chat-markdown-part"));
+    if (parts.length === 0) continue;
+    const lastPart = parts[parts.length - 1];
+    if (lastPart.hasAttribute(ANSWERED_ATTR)) continue;
+
+    // Read text excluding any badge we may have injected.
+    const clone = lastPart.cloneNode(true);
+    for (const b of clone.querySelectorAll("." + BADGE_CLS)) b.remove();
+    const text = (clone.innerText || "").trim();
+    if (text.length === 0) continue;
+
+    // Must end with "?" and contain a confirmation phrase.
+    if (text.slice(-1) !== "?" || !CONFIRM_RE.test(text)) continue;
+
+    // Chat input within the same container (or nearest ancestor widget).
+    const widget = lastPart.closest(".interactive-session") ||
+                   lastPart.closest(".chat-widget") ||
+                   lastPart.closest("[class*='chat-editor']") ||
+                   document;
+    const editor = widget.querySelector(".chat-editor-container [role='textbox']") ||
+                   document.querySelector(".chat-editor-container [role='textbox']");
+    if (!editor) continue;
+    const editorText = (editor.innerText || editor.value || "").trim();
+    if (editorText.length > 0) continue;
+
+    // Countdown badge management.
+    const now = Date.now();
+
+    // Instant mode: skip badge entirely when countdown is 0.
+    if (DELAY_MS <= 0) {
+      // Clean up any stale badge.
+      const oldBadge = lastPart.querySelector("." + BADGE_CLS);
+      if (oldBadge) oldBadge.remove();
+      lastPart.removeAttribute(BADGE_ATTR);
+      lastPart.setAttribute(ANSWERED_ATTR, "1");
+      editor.focus();
+      return JSON.stringify({
+        shouldType: true,
+        question: text.slice(-200),
+        remaining: 0,
+      });
+    }
+
+    let deadline = parseInt(lastPart.getAttribute(BADGE_ATTR) || "0", 10);
+    if (!deadline) {
+      deadline = now + DELAY_MS;
+      lastPart.setAttribute(BADGE_ATTR, String(deadline));
+    }
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+
+    if (remaining <= 0) {
+      const oldBadge = lastPart.querySelector("." + BADGE_CLS);
+      if (oldBadge) oldBadge.remove();
+      lastPart.removeAttribute(BADGE_ATTR);
+      lastPart.setAttribute(ANSWERED_ATTR, "1");
+      editor.focus();
+      return JSON.stringify({
+        shouldType: true,
+        question: text.slice(-200),
+        remaining: 0,
+      });
+    }
+
+    // Show countdown badge.
+    let badge = lastPart.querySelector("." + BADGE_CLS);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = BADGE_CLS;
+      badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;" +
+        "width:18px;height:18px;padding:0;margin-left:6px;" +
+        "border-radius:50%;background:#8bc34a;color:#4a6e22;font-size:10px;" +
+        "font-weight:700;line-height:1;pointer-events:none;vertical-align:middle;";
+      lastPart.appendChild(badge);
+    }
+    badge.textContent = String(remaining);
+    return JSON.stringify({
+      shouldType: false,
+      pending: true,
+      question: text.slice(-200),
+      remaining: remaining,
+    });
+  }
+
+  return JSON.stringify({shouldType: false, reason: "no matching question found"});
+})()
+"""
+
+
+def detect_chat_text_confirm_js(seconds: float) -> str:
+    """Return DETECT_CHAT_TEXT_CONFIRM_JS with countdown placeholder replaced."""
+    return DETECT_CHAT_TEXT_CONFIRM_JS.replace("__COUNTDOWN_SECS__", str(seconds))
