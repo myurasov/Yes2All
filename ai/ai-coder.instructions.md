@@ -95,9 +95,30 @@ Project-specific directions captured from the user. Update this file whenever th
 - Refuses to uncheck the last enabled port.
 - Checkbox state is also re-synced from the plist on every status tick.
 
+## Menubar config persistence
+
+- Settings changed via the menubar (ports, interval, sweep_tabs, countdown, apps) are saved to `~/Library/Application Support/yes2all/config.json` via `state.write_config()`.
+- On startup, the menubar hydrates from `config.json` first, then overrides from the installed plist if the watcher is running.
+- This means settings survive even when the watcher is stopped — no more "install then uninstall" hack to persist port changes.
+- `state.py` exports `read_config()` and `write_config()` alongside the existing `read_counts()`/`write_counts()`.
+
+## Menubar app launchers
+
+- "Launch" submenu with configurable entries: each has `name` (display), `app` (macOS app name for `open -a`), `port` (debug port).
+- Default entries: Cursor (:9222), VS Code (:9333). Stored in config.json under `apps` key.
+- Launches via `open -a <app> --args --remote-debugging-port=<port>`.
+- "Add App…" and "Edit Apps…" menu items for adding/editing entries. Edit shows a multi-line text area with one `name, app, port` per line.
+
 ## Menubar app auto-detection
 
 - Menubar labels for ports are now live-detected via `GET http://127.0.0.1:<port>/json/version`.
+
+## Code formatting
+
+- **Ruff** is the project formatter/linter (dev dependency).
+- VS Code is configured to format on save via `.vscode/settings.json` (requires the `charliermarsh.ruff` extension).
+- After making code edits, always run `uv run ruff format <changed files or dirs>` to ensure formatting is applied.
+- Config lives in `pyproject.toml` under `[tool.ruff]` / `[tool.ruff.format]`.
 - Both Cursor and VS Code report `Browser: "Chrome/..."` — the discriminator is the `User-Agent` token (`Cursor/x.y.z` or `Code/x.y.z`).
 - Label format: `"Cursor (9222)"` when running, `"Cursor (offline)" (9222)` when port is closed. Refreshed on every status tick (3s).
 
@@ -150,7 +171,12 @@ Project-specific directions captured from the user. Update this file whenever th
 
 ## Watcher port gotcha
 
-- The watcher only polls ports passed via `--port`. If a click handler "doesn't fire" for VS Code, first verify `9333` is in the installed launchd plist's `ProgramArguments` (or in the menubar's "Ports" submenu). Default install command: `uv run yes2all service install --port 9222 --port 9333 --interval 0.5`.
+- The watcher only polls ports passed via `--port`. If a click handler "doesn't fire" for VS Code, first verify `9333` is in the installed launchd plist's `ProgramArguments` (or in the menubar's "Ports" submenu). Default install command: `uv run yes2all service install --port 9222 --port 9333 --port 9444 --interval 0.5`.
+
+## Known ports
+
+- `KNOWN_PORTS` in `menubar.py`: `(9222, "Cursor")`, `(9333, "VS Code")`, `(9444, "VS Code Codex")`.
+- Default ports fallback (no plist): `[9222, 9333, 9444]`.
 
 ## Carousel auto-pick fallback
 

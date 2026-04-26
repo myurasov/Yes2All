@@ -1,6 +1,6 @@
 [project]
 name = "yes2all"
-version = "0.0.1"
+version = "1.0.0b1"
 description = "Auto-approve agent tool prompts in Cursor / VS Code via CDP."
 license = "Apache-2.0"
 authors = [{name = "Mikhail Yurasov", email = "me@yurasov.me"}]
@@ -15,6 +15,9 @@ dependencies = [
 [project.scripts]
 yes2all = "yes2all.cli:app"
 
+[dependency-groups]
+dev = ["ruff>=0.11"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -24,3 +27,9 @@ packages = ["src/yes2all"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/yes2all/assets" = "yes2all/assets"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+quote-style = "double"

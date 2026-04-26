@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Locate (and optionally click) the agent-tool approval 'Run' button in Cursor / VS Code."""
+
 from __future__ import annotations
 
 # JavaScript executed inside the editor's renderer to find approval buttons.
@@ -10,7 +11,7 @@ from __future__ import annotations
 # disabled. We also walk shadow DOM and same-origin iframes.
 FIND_APPROVAL_BUTTONS_JS = r"""
 (() => {
-  const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes"];
+  const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const results = [];
 
   function visible(el) {
@@ -150,13 +151,528 @@ CLICK_FIRST_APPROVAL_JS = FIND_APPROVAL_BUTTONS_JS.replace(
 )
 
 
+# ---------------------------------------------------------------------------
+# Countdown badge: inject a visible timer next to approval buttons and click
+# only after __COUNTDOWN_SECS__ seconds.  The badge persists across poll ticks
+# because the DOM stays alive between evaluations.  Replace the placeholder
+# at runtime with the actual delay.
+# ---------------------------------------------------------------------------
+COUNTDOWN_BADGE_JS = r"""
+(() => {
+  const DELAY_MS = __COUNTDOWN_SECS__ * 1000;
+  const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
+  const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button",
+    "composer-run-button", "ui-button", "ui-shell-tool-call__run-btn"];
+  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
+  const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
+  const BADGE_ATTR = "data-y2a-deadline";
+  const BADGE_CLS  = "y2a-countdown-badge";
+
+  function visible(el) {
+    if (!el || !(el instanceof Element)) return false;
+    if (el.getAttribute && el.getAttribute("aria-hidden") === "true") return false;
+    if (el.hasAttribute && el.hasAttribute("disabled")) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) return false;
+    const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+    if (cs.visibility === "hidden" || cs.display === "none" || parseFloat(cs.opacity) === 0)
+      return false;
+    return true;
+  }
+  function firstWord(t) {
+    if (!t) return t;
+    const m = (t.split(/[\s\n\r]+/)[0] || "").match(/^[A-Za-z]+/);
+    return m ? m[0] : "";
+  }
+  function looksClickable(el) {
+    if (!(el instanceof Element)) return false;
+    if (el.tagName === "BUTTON") return true;
+    if ((el.getAttribute("role") || "") === "button") return true;
+    if (el.classList) for (const c of CLICKABLE_FRAGS) if (el.classList.contains(c)) return true;
+    return false;
+  }
+  function clickableAncestor(el) {
+    let cur = el;
+    for (let i = 0; i < 8 && cur; i++) { if (looksClickable(cur)) return cur; cur = cur.parentElement; }
+    return null;
+  }
+  function fire(el, type, init) {
+    el.dispatchEvent(new MouseEvent(type, Object.assign(
+      {bubbles:true, cancelable:true, view:window, button:0}, init||{})));
+  }
+  function realClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width/2, y = r.y + r.height/2;
+    const o = {clientX:x, clientY:y};
+    fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+  }
+
+  const BADGE_CSS = "display:inline-flex;align-items:center;justify-content:center;" +
+    "width:16px;height:16px;padding:0;margin-left:4px;" +
+    "border-radius:50%;background:#8bc34a;color:#4a6e22;font-size:10px;" +
+    "font-weight:700;line-height:1;pointer-events:none;vertical-align:middle;";
+
+  function ensureBadge(target) {
+    let badge = target.querySelector("." + BADGE_CLS);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = BADGE_CLS;
+      badge.style.cssText = BADGE_CSS;
+      target.appendChild(badge);
+    }
+    return badge;
+  }
+
+  const now = Date.now();
+  const pending = [];
+  const clicked = [];
+
+  // --- 1) Cursor-style approval buttons (Run, Allow, etc.) ---
+  const seen = new Set();
+  for (const node of document.querySelectorAll("*")) {
+    if (!(node instanceof Element)) continue;
+    const txt = ((node.innerText || node.textContent) || "").trim();
+    if (!txt) continue;
+    const word = firstWord(txt);
+    if (!VERBS.includes(word)) continue;
+    if (txt.length > 40) continue;
+    const t = clickableAncestor(node);
+    if (!t || seen.has(t) || !visible(t)) continue;
+    seen.add(t);
+
+    let deadline = parseInt(t.getAttribute(BADGE_ATTR) || "0", 10);
+    if (!deadline) { deadline = now + DELAY_MS; t.setAttribute(BADGE_ATTR, String(deadline)); }
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+    const badge = ensureBadge(t);
+    if (remaining <= 0) {
+      badge.remove(); t.removeAttribute(BADGE_ATTR);
+      realClick(t);
+      clicked.push({text: ((t.innerText || "").trim()).slice(0, 80)});
+    } else {
+      badge.textContent = String(remaining);
+      pending.push({text: ((t.innerText || "").trim()).slice(0, 80), remaining});
+    }
+  }
+
+  // --- 2) Copilot carousel prompts (chat-question) ---
+  const carousels = document.querySelectorAll(".chat-question-carousel-container");
+  for (const c of carousels) {
+    if (!visible(c)) continue;
+    const items = Array.from(c.querySelectorAll('.chat-question-list-item[role="option"]'));
+    if (items.length === 0) continue;
+    // Pick affirmative option (same logic as CLICK_CHAT_QUESTION_JS).
+    let chosen = null;
+    for (const it of items) {
+      const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
+      if (NEGATIVE.test(lbl)) continue;
+      if (POSITIVE.test(lbl)) { chosen = it; break; }
+    }
+    if (!chosen) {
+      for (const it of items) {
+        const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
+        if (NEGATIVE.test(lbl)) continue;
+        chosen = it; break;
+      }
+    }
+    if (!chosen) continue;
+    // Find submit button.
+    const submitBtn =
+      c.querySelector(".chat-question-submit") ||
+      c.querySelector("a.monaco-button:not(.chat-question-close):not(.chat-question-collapse-toggle)");
+    const badgeTarget = submitBtn || chosen;
+    if (seen.has(badgeTarget)) continue;
+    seen.add(badgeTarget);
+
+    let deadline = parseInt(badgeTarget.getAttribute(BADGE_ATTR) || "0", 10);
+    if (!deadline) { deadline = now + DELAY_MS; badgeTarget.setAttribute(BADGE_ATTR, String(deadline)); }
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+    const badge = ensureBadge(badgeTarget);
+    const label = (chosen.querySelector(".chat-question-list-label")?.innerText || chosen.innerText || "").trim().slice(0, 80);
+    if (remaining <= 0) {
+      badge.remove(); badgeTarget.removeAttribute(BADGE_ATTR);
+      if (!chosen.classList.contains("selected")) realClick(chosen);
+      if (submitBtn && visible(submitBtn)) {
+        realClick(submitBtn);
+      } else {
+        const list = c.querySelector(".chat-question-list") || c;
+        const k = {key:"Enter", code:"Enter", keyCode:13, which:13, metaKey:true, bubbles:true, cancelable:true};
+        list.dispatchEvent(new KeyboardEvent("keydown", k));
+        list.dispatchEvent(new KeyboardEvent("keyup", k));
+      }
+      clicked.push({text: label});
+    } else {
+      // Select the option visually so user sees what will be submitted.
+      if (!chosen.classList.contains("selected")) realClick(chosen);
+      badge.textContent = String(remaining);
+      pending.push({text: label, remaining});
+    }
+  }
+
+  // --- 3) Copilot confirmation widgets (Allow / Skip) ---
+  const widgets = document.querySelectorAll(".chat-confirmation-widget-container");
+  for (const w of widgets) {
+    if (!visible(w)) continue;
+    const btnRoot = w.querySelector(".chat-confirmation-widget-buttons") || w;
+    const candidates = Array.from(btnRoot.querySelectorAll('a.monaco-button, button.monaco-button, [role="button"].monaco-button'));
+    let chosenBtn = null;
+    for (const b of candidates) {
+      if (!visible(b)) continue;
+      if (b.classList.contains("monaco-dropdown-button")) continue;
+      if (b.classList.contains("secondary")) continue;
+      const txt = (b.innerText || b.textContent || "").trim();
+      const aria = (b.getAttribute("aria-label") || "").trim();
+      const label = txt || aria;
+      if (NEGATIVE.test(label)) continue;
+      if (POSITIVE.test(label)) { chosenBtn = b; break; }
+    }
+    if (!chosenBtn || seen.has(chosenBtn)) continue;
+    seen.add(chosenBtn);
+
+    let deadline = parseInt(chosenBtn.getAttribute(BADGE_ATTR) || "0", 10);
+    if (!deadline) { deadline = now + DELAY_MS; chosenBtn.setAttribute(BADGE_ATTR, String(deadline)); }
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+    const badge = ensureBadge(chosenBtn);
+    const label = ((chosenBtn.innerText || chosenBtn.textContent) || "").trim().slice(0, 80);
+    if (remaining <= 0) {
+      badge.remove(); chosenBtn.removeAttribute(BADGE_ATTR);
+      realClick(chosenBtn);
+      clicked.push({text: label});
+    } else {
+      badge.textContent = String(remaining);
+      pending.push({text: label, remaining});
+    }
+  }
+
+  // Clean up stale badges on elements no longer in the DOM or no longer pending.
+  for (const b of document.querySelectorAll("." + BADGE_CLS)) {
+    const p = b.parentElement;
+    if (p && !p.getAttribute(BADGE_ATTR)) b.remove();
+  }
+
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending});
+})()
+"""
+
+
+# Codex-specific countdown badge variant for iframe targets.
+COUNTDOWN_CODEX_BADGE_JS = r"""
+(() => {
+  const DELAY_MS = __COUNTDOWN_SECS__ * 1000;
+  const POSITIVE = /^yes\b/i;
+  const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
+  const BADGE_ATTR = "data-y2a-deadline";
+  const BADGE_CLS  = "y2a-countdown-badge";
+
+  function fire(el, type, init) {
+    el.dispatchEvent(new MouseEvent(type, Object.assign(
+      {bubbles:true, cancelable:true, view:el.ownerDocument.defaultView, button:0}, init||{})));
+  }
+  function realClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width/2, y = r.y + r.height/2;
+    const o = {clientX:x, clientY:y};
+    fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+  }
+
+  let doc = document;
+  const inner = document.querySelector('#active-frame');
+  if (inner) { try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {} }
+
+  const radios = Array.from(doc.querySelectorAll('button[role="radio"]'));
+  if (radios.length === 0)
+    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
+
+  let chosen = null;
+  for (const r of radios) {
+    const label = (r.getAttribute("aria-label") || r.innerText || "").trim();
+    if (NEGATIVE.test(label)) continue;
+    if (POSITIVE.test(label)) { chosen = r; break; }
+  }
+  if (!chosen)
+    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
+
+  const now = Date.now();
+  let deadline = parseInt(chosen.getAttribute(BADGE_ATTR) || "0", 10);
+  if (!deadline) {
+    deadline = now + DELAY_MS;
+    chosen.setAttribute(BADGE_ATTR, String(deadline));
+  }
+  const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+
+  // Ensure badge.
+  let badge = chosen.querySelector("." + BADGE_CLS);
+  if (!badge) {
+    badge = doc.createElement("span");
+    badge.className = BADGE_CLS;
+    badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;" +
+      "width:16px;height:16px;padding:0;margin-left:4px;" +
+      "border-radius:50%;background:#8bc34a;color:#4a6e22;font-size:10px;" +
+      "font-weight:700;line-height:1;pointer-events:none;vertical-align:middle;";
+    chosen.appendChild(badge);
+  }
+
+  if (remaining <= 0) {
+    badge.remove();
+    chosen.removeAttribute(BADGE_ATTR);
+    realClick(chosen);
+    const allButtons = Array.from(doc.querySelectorAll('button'));
+    for (const b of allButtons) {
+      if (/^submit\b/i.test((b.innerText || "").trim())) { realClick(b); break; }
+    }
+    const label = (chosen.getAttribute("aria-label") || "").trim().slice(0, 120);
+    return JSON.stringify({url: location.href, count: 1, pending: 0, clicked: [{text: label}]});
+  }
+
+  badge.textContent = String(remaining);
+  const label = (chosen.getAttribute("aria-label") || "").trim().slice(0, 120);
+  return JSON.stringify({url: location.href, count: 0, pending: 1, clicked: [], pendingDetails: [{text: label, remaining}]});
+})()
+"""
+
+
+def countdown_js(seconds: float) -> str:
+    """Return COUNTDOWN_BADGE_JS with the placeholder replaced."""
+    return COUNTDOWN_BADGE_JS.replace("__COUNTDOWN_SECS__", str(seconds))
+
+
+def countdown_codex_js(seconds: float) -> str:
+    """Return COUNTDOWN_CODEX_BADGE_JS with the placeholder replaced."""
+    return COUNTDOWN_CODEX_BADGE_JS.replace("__COUNTDOWN_SECS__", str(seconds))
+
+
+# Claude Code extension (anthropic.claude-code) renders its approval UI inside
+# a webview iframe. Permission prompt container: div[class*="permissionRequestContainer"].
+# Buttons: button[class*="button_"] inside div[class*="buttonContainer"]. Text
+# format: "1 Yes", "2 Yes, allow access to ...", "3 No" (numbered options).
+# Clicking the button directly submits (no separate submit step).
+# Variant 2 (radio + submit): div[role="radio"][class*="option_"] with labels
+# like "Yes", "Always allow", "No", "Other" + a "Submit answers" button.
+# Must click the "Yes" radio first, then click Submit.
+CLICK_CLAUDE_PROMPT_JS = r"""
+(() => {
+  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
+  const NEGATIVE = /^(no|stop|cancel|deny|reject|skip|other)\b/i;
+  const BADGE_CLS = "y2a-countdown-badge";
+
+  function fire(el, type, init) {
+    el.dispatchEvent(new MouseEvent(type, Object.assign(
+      {bubbles:true, cancelable:true, view:el.ownerDocument.defaultView, button:0}, init||{})));
+  }
+  function realClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width/2, y = r.y + r.height/2;
+    const o = {clientX:x, clientY:y};
+    fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+  }
+  function btnText(el) {
+    const clone = el.cloneNode(true);
+    for (const b of clone.querySelectorAll("." + BADGE_CLS)) b.remove();
+    return (clone.innerText || clone.textContent || "").trim();
+  }
+  function firstLine(t) { return (t.split(/\r?\n/)[0] || "").trim(); }
+
+  let doc = document;
+  const inner = document.querySelector('#active-frame');
+  if (inner) { try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {} }
+
+  const containers = Array.from(doc.querySelectorAll('[class*="permissionRequestContainer"]'))
+    .filter(c => !c.className.includes("Background"));
+  if (containers.length === 0)
+    return JSON.stringify({url: location.href, count: 0, results: []});
+
+  const results = [];
+  for (const c of containers) {
+    // Variant 2: radio options + submit button.
+    const radios = Array.from(c.querySelectorAll('[role="radio"]'));
+    if (radios.length > 0) {
+      let chosenRadio = null;
+      for (const r of radios) {
+        const label = firstLine(btnText(r));
+        if (NEGATIVE.test(label)) continue;
+        if (POSITIVE.test(label)) { chosenRadio = r; break; }
+      }
+      if (!chosenRadio) {
+        // Fallback: first non-negative radio.
+        for (const r of radios) {
+          const label = firstLine(btnText(r));
+          if (NEGATIVE.test(label)) continue;
+          chosenRadio = r; break;
+        }
+      }
+      if (chosenRadio) {
+        const label = firstLine(btnText(chosenRadio));
+        if (chosenRadio.getAttribute("aria-checked") !== "true") realClick(chosenRadio);
+        // Click submit button.
+        const submitBtn = c.querySelector('[class*="buttonContainer"] button');
+        if (submitBtn) realClick(submitBtn);
+        results.push({label, question: label});
+        continue;
+      }
+    }
+
+    // Variant 1: direct numbered buttons.
+    const btns = Array.from(c.querySelectorAll('[class*="buttonContainer"] button'));
+    if (btns.length === 0) continue;
+    let chosen = null;
+    for (const b of btns) {
+      const label = btnText(b).replace(/^\d+\s+/, "");
+      if (NEGATIVE.test(label)) continue;
+      if (POSITIVE.test(label)) { chosen = b; break; }
+    }
+    if (!chosen) continue;
+    const label = btnText(chosen).replace(/^\d+\s+/, "");
+    realClick(chosen);
+    results.push({label, question: btnText(chosen)});
+  }
+  return JSON.stringify({url: location.href, count: results.length, results});
+})()
+"""
+
+
+COUNTDOWN_CLAUDE_BADGE_JS = r"""
+(() => {
+  const DELAY_MS = __COUNTDOWN_SECS__ * 1000;
+  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
+  const NEGATIVE = /^(no|stop|cancel|deny|reject|skip|other)\b/i;
+  const BADGE_ATTR = "data-y2a-deadline";
+  const BADGE_CLS  = "y2a-countdown-badge";
+
+  function fire(el, type, init) {
+    el.dispatchEvent(new MouseEvent(type, Object.assign(
+      {bubbles:true, cancelable:true, view:el.ownerDocument.defaultView, button:0}, init||{})));
+  }
+  function realClick(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width/2, y = r.y + r.height/2;
+    const o = {clientX:x, clientY:y};
+    fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+  }
+
+  let doc = document;
+  const inner = document.querySelector('#active-frame');
+  if (inner) { try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {} }
+
+  function btnText(el) {
+    const clone = el.cloneNode(true);
+    for (const b of clone.querySelectorAll("." + BADGE_CLS)) b.remove();
+    return (clone.innerText || clone.textContent || "").trim();
+  }
+  function firstLine(t) { return (t.split(/\r?\n/)[0] || "").trim(); }
+
+  const containers = Array.from(doc.querySelectorAll('[class*="permissionRequestContainer"]'))
+    .filter(c => !c.className.includes("Background"));
+  if (containers.length === 0) {
+    for (const b of doc.querySelectorAll("." + BADGE_CLS)) b.remove();
+    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
+  }
+
+  const now = Date.now();
+  const pending = [];
+  const clicked = [];
+
+  for (const c of containers) {
+    // Variant 2: radio options + submit button.
+    const radios = Array.from(c.querySelectorAll('[role="radio"]'));
+    const submitBtn = c.querySelector('[class*="buttonContainer"] button');
+    if (radios.length > 0 && submitBtn) {
+      let chosenRadio = null;
+      for (const r of radios) {
+        const label = firstLine(btnText(r));
+        if (NEGATIVE.test(label)) continue;
+        if (POSITIVE.test(label)) { chosenRadio = r; break; }
+      }
+      if (!chosenRadio) {
+        for (const r of radios) {
+          const label = firstLine(btnText(r));
+          if (NEGATIVE.test(label)) continue;
+          chosenRadio = r; break;
+        }
+      }
+      if (chosenRadio) {
+        // Select the radio visually.
+        if (chosenRadio.getAttribute("aria-checked") !== "true") realClick(chosenRadio);
+        // Badge goes on the submit button.
+        let deadline = parseInt(submitBtn.getAttribute(BADGE_ATTR) || "0", 10);
+        if (!deadline) { deadline = now + DELAY_MS; submitBtn.setAttribute(BADGE_ATTR, String(deadline)); }
+        const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+        let badge = submitBtn.querySelector("." + BADGE_CLS);
+        if (!badge) {
+          badge = doc.createElement("span");
+          badge.className = BADGE_CLS;
+          badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;" +
+            "width:16px;height:16px;padding:0;margin-left:4px;" +
+            "border-radius:50%;background:#8bc34a;color:#4a6e22;font-size:10px;" +
+            "font-weight:700;line-height:1;pointer-events:none;vertical-align:middle;";
+          submitBtn.appendChild(badge);
+        }
+        const label = firstLine(btnText(chosenRadio));
+        if (remaining <= 0) {
+          badge.remove(); submitBtn.removeAttribute(BADGE_ATTR);
+          realClick(submitBtn);
+          clicked.push({text: label});
+        } else {
+          badge.textContent = String(remaining);
+          pending.push({text: label, remaining});
+        }
+        continue;
+      }
+    }
+
+    // Variant 1: direct numbered buttons.
+    const btns = Array.from(c.querySelectorAll('[class*="buttonContainer"] button'));
+    if (btns.length === 0) continue;
+
+    let chosen = null;
+    for (const b of btns) {
+      const label = btnText(b).replace(/^\d+\s+/, "");
+      if (NEGATIVE.test(label)) continue;
+      if (POSITIVE.test(label)) { chosen = b; break; }
+    }
+    if (!chosen) continue;
+
+    let deadline = parseInt(chosen.getAttribute(BADGE_ATTR) || "0", 10);
+    if (!deadline) { deadline = now + DELAY_MS; chosen.setAttribute(BADGE_ATTR, String(deadline)); }
+    const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+
+    let badge = chosen.querySelector("." + BADGE_CLS);
+    if (!badge) {
+      badge = doc.createElement("span");
+      badge.className = BADGE_CLS;
+      badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;" +
+        "width:16px;height:16px;padding:0;margin-left:4px;" +
+        "border-radius:50%;background:#8bc34a;color:#4a6e22;font-size:10px;" +
+        "font-weight:700;line-height:1;pointer-events:none;vertical-align:middle;";
+      chosen.appendChild(badge);
+    }
+
+    const label = btnText(chosen).replace(/^\d+\s+/, "");
+    if (remaining <= 0) {
+      badge.remove(); chosen.removeAttribute(BADGE_ATTR);
+      realClick(chosen);
+      clicked.push({text: label});
+    } else {
+      badge.textContent = String(remaining);
+      pending.push({text: label, remaining});
+    }
+  }
+
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending});
+})()
+"""
+
+
+def countdown_claude_js(seconds: float) -> str:
+    """Return COUNTDOWN_CLAUDE_BADGE_JS with the placeholder replaced."""
+    return COUNTDOWN_CLAUDE_BADGE_JS.replace("__COUNTDOWN_SECS__", str(seconds))
+
+
 # VS Code Copilot Chat renders tool-confirmation prompts as a "carousel" widget
 # (`div.chat-question-carousel-container`). It's a listbox of numbered options
 # with a Submit button; affirmative is typically option #1 (e.g. "Yes, run it").
 # This DOM is in the main page (not inside a webview), so CDP can drive it.
 CLICK_CHAT_QUESTION_JS = r"""
 (() => {
-  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok)\b/i;
+  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
 
   function visible(el) {
@@ -245,7 +761,7 @@ CLICK_CHAT_QUESTION_JS = r"""
 # "Skip" carries the extra class `secondary`).
 CLICK_CHAT_CONFIRMATION_JS = r"""
 (() => {
-  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok)\b/i;
+  const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
 
   function visible(el) {
@@ -305,7 +821,7 @@ CLICK_CHAT_CONFIRMATION_JS = r"""
 # a non-foreground chat is to activate that tab, scan, click, then restore.
 SWEEP_TABS_AND_CLICK_JS = r"""
 (async () => {
-  const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes"];
+  const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button", "composer-run-button"];
 
   function visible(el) {
@@ -522,4 +1038,3 @@ CLICK_CODEX_PROMPT_JS = r"""
   });
 })()
 """
-

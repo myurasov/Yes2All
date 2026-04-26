@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Minimal Chrome DevTools Protocol client over WebSocket."""
+
 from __future__ import annotations
 
 import itertools
@@ -61,7 +62,9 @@ class CDPSession:
             await self._ws.close()
             self._ws = None
 
-    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def send(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         assert self._ws is not None, "session not opened"
         msg_id = next(self._ids)
         payload = {"id": msg_id, "method": method, "params": params or {}}

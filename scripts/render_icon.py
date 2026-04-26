@@ -13,6 +13,7 @@
 Run with:  uv run --with pillow python scripts/render_icon.py
 Pillow is intentionally not a runtime dependency.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -62,9 +63,9 @@ def _draw_circle(size: int, color, pad: float = 0.0) -> Image.Image:
     # Inset slightly so the stroke fits inside the inner box.
     inset = w / 2 + max(1, int(s * 0.01))
     d.ellipse(
-        [off + inset, off + inset,
-         off + inner - inset, off + inner - inset],
-        outline=color, width=w,
+        [off + inset, off + inset, off + inner - inset, off + inner - inset],
+        outline=color,
+        width=w,
     )
     return img.resize((size, size), Image.LANCZOS)
 
