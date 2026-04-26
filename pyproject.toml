@@ -1,9 +1,9 @@
 [project]
 name = "yes2all"
-version = "1.0.0b1"
+version = "1.0.0"
 description = "Auto-approve agent tool prompts in Cursor / VS Code via CDP."
 license = "Apache-2.0"
-authors = [{name = "Mikhail Yurasov", email = "me@yurasov.me"}]
+authors = [{ name = "Mikhail Yurasov", email = "me@yurasov.me" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "websockets>=13",
