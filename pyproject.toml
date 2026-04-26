@@ -1,6 +1,6 @@
 [project]
 name = "yes2all"
-version = "1.0.0"
+version = "1.0.1"
 description = "Auto-approve agent tool prompts in Cursor / VS Code via CDP."
 license = "Apache-2.0"
 authors = [{ name = "Mikhail Yurasov", email = "me@yurasov.me" }]
