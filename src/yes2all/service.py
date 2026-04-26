@@ -108,7 +108,7 @@ def launchd_plist(
     stderr = log_dir / "yes2all.err.log"
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
     port_args = "\n    ".join(f"<string>--port</string>   <string>{p}</string>" for p in ports)
-    countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>" if countdown > 0 else ""
+    countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -270,7 +270,7 @@ def systemd_unit(ports: list[int], interval: float, sweep_tabs: bool = True, cou
     exe = _yes2all_executable()
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
     port_args = " ".join(f"--port {p}" for p in ports)
-    countdown_arg = f" --countdown {countdown}" if countdown > 0 else ""
+    countdown_arg = f" --countdown {countdown}"
     return f"""[Unit]
 Description=Yes2All — auto-approve agent tool prompts in Cursor / VS Code
 After=graphical-session.target
