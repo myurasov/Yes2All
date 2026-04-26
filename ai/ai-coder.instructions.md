@@ -143,6 +143,16 @@ Project-specific directions captured from the user. Update this file whenever th
 - Menubar title is back to plain text glyphs (`✓` / `○`) — no PNG icon next to it.
 - About dialog uses a theme-aware large icon: `icon-large-dark.png` (black) on light system theme, `icon-large-light.png` (white) on dark system theme. Detection via `defaults read -g AppleInterfaceStyle`.
 
+## Text-based chat confirmation questions
+
+- VS Code Copilot Chat sometimes asks yes/no questions in plain text (e.g. "shall I proceed?", "yes or no: do X?") instead of rendering a button/widget. The agent waits for the user to type a reply.
+- Handler: `DETECT_CHAT_TEXT_CONFIRM_JS` in `finder.py` detects these, `_handle_text_confirm()` in `cli.py` types "Yes" + Enter via CDP `Input.insertText` / `Input.dispatchKeyEvent`.
+- Detection criteria: last `.chat-markdown-part` ends with `?`, matches `CONFIRM_RE` (shall I, should I, do you want, yes or no, proceed, etc.), chat input is empty.
+- The JS scopes question + editor to the **same chat widget** (`.interactive-session` or fallback) to avoid typing into the wrong chat panel.
+- When countdown > 0, a badge is shown on the question text. When countdown = 0, fires immediately with no badge. After firing, the JS focuses the chat editor, returns `shouldType: true`, and Python types "Yes" + presses Enter.
+- `data-y2a-text-answered` attribute prevents re-answering the same question.
+- `CDPSession.type_text(text)` and `CDPSession.press_enter()` helpers added to `cdp.py`.
+
 ## User workflow note (2026-04-25)
 
 - When asked how to start with the macOS menu bar, provide: `uv sync` then `uv run yes2all menubar` (foreground). For auto-start at login: `uv run yes2all service install-menubar`.
@@ -197,3 +207,8 @@ Project-specific directions captured from the user. Update this file whenever th
 - The prompt is inside a nested `#active-frame` iframe within the webview. Radio options are `button[role="radio"][type="submit"]` with `aria-label` like "Yes", "Yes, and don't ask again for commands that start with …". A separate "Submit ⏎" button confirms, and a "Skip" button declines.
 - Handler: `CLICK_CODEX_PROMPT_JS` in `finder.py`. Runs on **iframe** CDP targets (not page targets). Selects the first radio whose `aria-label` starts with "Yes", then clicks Submit.
 - Service loop now also iterates `list_targets()` for iframe-type targets on each port per tick and evaluates `CLICK_CODEX_PROMPT_JS` on each.
+
+## Countdown propagation bug (fixed)
+
+- `service.py` used to omit `--countdown` from the launchd plist when countdown was 0 (`if countdown > 0`). Since the CLI `watch` command defaults `--countdown` to `3`, omitting it meant the watcher always used 3s regardless of the menubar setting.
+- Fix: always write `--countdown <value>` to both the launchd plist and systemd unit, even when 0.
