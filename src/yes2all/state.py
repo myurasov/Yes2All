@@ -1,9 +1,9 @@
 # Copyright 2026 Mikhail Yurasov <me@yurasov.me>
 # SPDX-License-Identifier: Apache-2.0
 
-"""Cross-process state shared between the watcher and menu-bar app.
+"""Cross-process state shared between the service and menu-bar app.
 
-Currently just a per-port counter of how many approval clicks the watcher has
+Currently just a per-port counter of how many approval clicks the service has
 made. Persisted as a small JSON file so the menu-bar process can read it back.
 """
 
@@ -11,9 +11,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
-COUNTS_PATH = Path.home() / "Library" / "Application Support" / "yes2all" / "counts.json"
+
+def _data_dir() -> Path:
+    """Return the platform-appropriate data directory for yes2all."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "yes2all"
+    if sys.platform == "win32":
+        return Path(os.getenv("APPDATA") or Path.home()) / "yes2all"
+    # Linux / other: XDG_DATA_HOME or ~/.local/share
+    return Path(os.getenv("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "yes2all"
+
+
+COUNTS_PATH = _data_dir() / "counts.json"
 
 
 def read_counts() -> dict[int, int]:
@@ -47,13 +59,13 @@ def add_clicks(port: int, n: int) -> None:
 
 # ----- menubar config persistence ---------------------------------------------
 
-CONFIG_PATH = Path.home() / "Library" / "Application Support" / "yes2all" / "config.json"
+CONFIG_PATH = _data_dir() / "config.json"
 
 _CONFIG_DEFAULTS: dict[str, object] = {
-    "ports": [9222, 9333, 9444],
-    "interval": 0.5,
-    "sweep_tabs": True,
-    "countdown": 0,
+    "ports": [9222, 9333],
+    "interval": 1,
+    "sweep_tabs": False,
+    "countdown": 3,
     "apps": [
         {"name": "Cursor", "app": "Cursor", "port": 9222},
         {"name": "VS Code", "app": "Visual Studio Code", "port": 9333},
