@@ -51,7 +51,7 @@ def read_installed_args() -> dict | None:
             data = plistlib.load(f)
         args = data.get("ProgramArguments", [])
         ports: list[int] = []
-        interval = 0.5
+        interval = 1
         sweep_tabs = True
         countdown = 0.0
         i = 0
@@ -107,14 +107,8 @@ def launchd_plist(
     stdout = log_dir / "yes2all.out.log"
     stderr = log_dir / "yes2all.err.log"
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
-    port_args = "\n    ".join(
-        f"<string>--port</string>   <string>{p}</string>" for p in ports
-    )
-    countdown_args = (
-        f"\n    <string>--countdown</string><string>{countdown}</string>"
-        if countdown > 0
-        else ""
-    )
+    port_args = "\n    ".join(f"<string>--port</string>   <string>{p}</string>" for p in ports)
+    countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>" if countdown > 0 else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -138,17 +132,11 @@ def launchd_plist(
 """
 
 
-def launchd_install(
-    ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0
-) -> None:
+def launchd_install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
     plist_path = launchd_plist_path()
     log_dir = Path.home() / "Library" / "Logs" / "yes2all"
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(
-        launchd_plist(
-            ports, interval, log_dir, sweep_tabs=sweep_tabs, countdown=countdown
-        )
-    )
+    plist_path.write_text(launchd_plist(ports, interval, log_dir, sweep_tabs=sweep_tabs, countdown=countdown))
     print(f"wrote {plist_path}")
     # Reload if already loaded, then load.
     subprocess.run(
@@ -164,9 +152,7 @@ def launchd_install(
         check=False,
     )
     if r.returncode != 0:
-        raise RuntimeError(
-            f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}"
-        )
+        raise RuntimeError(f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}")
     print(f"loaded launchd job {LABEL}")
     print(f"logs: {log_dir}")
 
@@ -187,9 +173,7 @@ def launchd_uninstall() -> None:
 
 
 def launchd_status() -> None:
-    r = subprocess.run(
-        ["launchctl", "list"], capture_output=True, text=True, check=False
-    )
+    r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, check=False)
     matches = [ln for ln in r.stdout.splitlines() if LABEL in ln]
     if matches:
         print("loaded:")
@@ -254,9 +238,7 @@ def menubar_install() -> None:
         check=False,
     )
     if r.returncode != 0:
-        raise RuntimeError(
-            f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}"
-        )
+        raise RuntimeError(f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}")
     print(f"loaded launchd job {MENUBAR_LABEL}")
 
 
@@ -284,9 +266,7 @@ def systemd_unit_path() -> Path:
     return Path.home() / ".config" / "systemd" / "user" / f"{LABEL}.service"
 
 
-def systemd_unit(
-    ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0
-) -> str:
+def systemd_unit(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> str:
     exe = _yes2all_executable()
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
     port_args = " ".join(f"--port {p}" for p in ports)
@@ -305,14 +285,10 @@ WantedBy=default.target
 """
 
 
-def systemd_install(
-    ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0
-) -> None:
+def systemd_install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
     unit_path = systemd_unit_path()
     unit_path.parent.mkdir(parents=True, exist_ok=True)
-    unit_path.write_text(
-        systemd_unit(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown)
-    )
+    unit_path.write_text(systemd_unit(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown))
     print(f"wrote {unit_path}")
     for cmd in (
         ["systemctl", "--user", "daemon-reload"],
@@ -344,17 +320,13 @@ def systemd_uninstall() -> None:
 
 
 def systemd_status() -> None:
-    subprocess.run(
-        ["systemctl", "--user", "status", f"{LABEL}.service", "--no-pager"], check=False
-    )
+    subprocess.run(["systemctl", "--user", "status", f"{LABEL}.service", "--no-pager"], check=False)
 
 
 # ----- dispatch ---------------------------------------------------------------
 
 
-def install(
-    ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0
-) -> None:
+def install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
     sysname = platform.system()
     if sysname == "Darwin":
         launchd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown)
@@ -362,8 +334,7 @@ def install(
         systemd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown)
     else:
         raise RuntimeError(
-            f"Unsupported platform for service install: {sysname}. "
-            "On Windows, use Task Scheduler manually for now."
+            f"Unsupported platform for service install: {sysname}. On Windows, use Task Scheduler manually for now."
         )
 
 
