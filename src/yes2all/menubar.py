@@ -1,7 +1,7 @@
 # Copyright 2026 Mikhail Yurasov <me@yurasov.me>
 # SPDX-License-Identifier: Apache-2.0
 
-"""macOS menu-bar app to start/stop the Yes2All background watcher.
+"""macOS menu-bar app (y2a-menubar) to start/stop y2a-service.
 
 Uses `rumps`. Run with `yes2all menubar`.
 """
@@ -32,18 +32,33 @@ from .state import read_config, write_config
 _ASSETS = Path(__file__).parent / "assets"
 # Two flat checkmark variants (loaded) + two open-circle variants (stopped).
 # The menubar picks the pair based on system theme.
-ICON_DARK = str(_ASSETS / "icon-dark.png")  # black check, for Light theme
-ICON_LIGHT = str(_ASSETS / "icon-light.png")  # white check, for Dark theme
-ICON_OFF_DARK = str(_ASSETS / "icon-off-dark.png")
-ICON_OFF_LIGHT = str(_ASSETS / "icon-off-light.png")
-ICON_FLASH = str(_ASSETS / "icon-flash.png")  # brief green pulse on click
+# We use @2x images and set logical size to 22x22 for retina sharpness.
+ICON_DARK = str(_ASSETS / "icon-dark@2x.png")  # black check, for Light theme
+ICON_LIGHT = str(_ASSETS / "icon-light@2x.png")  # white check, for Dark theme
+ICON_OFF_DARK = str(_ASSETS / "icon-off-dark@2x.png")
+ICON_OFF_LIGHT = str(_ASSETS / "icon-off-light@2x.png")
+ICON_FLASH = str(_ASSETS / "icon-flash@2x.png")  # brief green pulse on click
 ICON_LARGE_DARK = str(_ASSETS / "icon-large-dark.png")
 ICON_LARGE_LIGHT = str(_ASSETS / "icon-large-light.png")
+
+# Logical size for menubar icons (actual pixels are 2x for retina).
+_ICON_SIZE = 22
 
 # Duration of the green flash after a click is observed (seconds).
 FLASH_DURATION = 0.45
 
 LOG_OUT = Path.home() / "Library" / "Logs" / "yes2all" / "yes2all.out.log"
+
+
+def _load_retina_icon(path: str) -> "NSImage":  # noqa: F821
+    """Load a @2x PNG and set its logical size so macOS renders it at retina."""
+    from AppKit import NSImage, NSSize  # type: ignore[import-not-found]
+
+    img = NSImage.alloc().initWithContentsOfFile_(path)
+
+    if img:
+        img.setSize_(NSSize(_ICON_SIZE, _ICON_SIZE))
+    return img
 
 
 def _menu_icon(loaded: bool) -> str:
@@ -71,7 +86,6 @@ def _system_is_dark() -> bool:
 KNOWN_PORTS: list[tuple[int, str]] = [
     (9222, "Cursor"),
     (9333, "VS Code"),
-    (9444, "VS Code Codex"),
 ]
 
 
@@ -103,21 +117,38 @@ def _is_loaded() -> bool:
 
 
 class Yes2AllApp(rumps.App):
+    @property  # type: ignore[override]
+    def icon(self):
+        return self._icon
+
+    @icon.setter
+    def icon(self, icon_path: str | None) -> None:
+        self._icon = icon_path
+        if icon_path is not None:
+            self._icon_nsimage = _load_retina_icon(icon_path)
+        else:
+            self._icon_nsimage = None
+        try:
+            self._nsapp.setStatusBarIcon()
+        except AttributeError:
+            pass
+
     def __init__(self) -> None:
         super().__init__(
             "Yes2All",
             title=None,
-            icon=_menu_icon(_is_loaded()),
+            icon=None,
             template=False,
             quit_button=None,
         )
+        self.icon = _menu_icon(_is_loaded())
         # Hydrate from saved config, then override from plist if running.
         cfg = read_config()
         plist_cfg = svc.read_installed_args()
         if plist_cfg:
             cfg.update(plist_cfg)
-        self.ports: list[int] = cfg.get("ports") or [9222, 9333, 9444]
-        self.interval: float = cfg.get("interval", 0.5)
+        self.ports: list[int] = cfg.get("ports") or [9222, 9333]
+        self.interval: float = cfg.get("interval", 1)
         self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
         self.countdown: float = cfg.get("countdown", 0)
 
@@ -295,7 +326,7 @@ class Yes2AllApp(rumps.App):
         rumps.notification(
             "Yes2All",
             "Started",
-            f"ports {self.ports}, every {self.interval}s, sweep={'on' if self.sweep_tabs else 'off'}",
+            f"ports {self.ports}, every {self.interval}s, cycle tabs={'on' if self.sweep_tabs else 'off'}",
         )
 
     def on_stop(self, _: object) -> None:
@@ -305,7 +336,7 @@ class Yes2AllApp(rumps.App):
             rumps.notification("Yes2All", "Stop failed", str(e))
             return
         self._refresh_status()
-        rumps.notification("Yes2All", "Stopped", "watcher unloaded")
+        rumps.notification("Yes2All", "Stopped", "y2a-service unloaded")
 
     def on_toggle_sweep(self, item: rumps.MenuItem) -> None:
         self.sweep_tabs = not self.sweep_tabs
@@ -467,7 +498,7 @@ class Yes2AllApp(rumps.App):
             title="Add CDP Port",
             message="Enter a TCP port (1\u201365535) where Cursor or VS Code is\n"
             "running with --remote-debugging-port=<port>.",
-            default_text="9444",
+            default_text="9333",
             ok="Add",
             cancel="Cancel",
             dimensions=(120, 22),
@@ -573,7 +604,7 @@ class Yes2AllApp(rumps.App):
         msg = (
             f"Yes2All v{ver}\n"
             f"Auto-approves agent tool prompts in Cursor / VS Code via CDP.\n\n"
-            f"Watcher: {'running' if loaded else 'stopped'}\n"
+            f"Service: {'running' if loaded else 'stopped'}\n"
             f"Ports:   {ports_str}\n"
             f"Interval: {self.interval}s\n"
             f"Countdown: {self.countdown:.0f}s\n"
