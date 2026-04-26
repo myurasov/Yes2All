@@ -26,6 +26,7 @@ from .finder import (
     countdown_claude_js,
     countdown_codex_js,
     countdown_js,
+    detect_chat_text_confirm_js,
 )
 
 app = typer.Typer(add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code.")
@@ -88,6 +89,31 @@ def probe(
     asyncio.run(_run())
 
 
+async def _handle_text_confirm(page, prt: int, detect_js: str) -> int:
+    """Detect a text-based confirmation question and type 'Yes' + Enter.
+
+    Returns the number of confirmations answered (0 or 1).
+    """
+    try:
+        async with CDPSession(page.ws_url) as s:
+            raw = await s.evaluate(detect_js)
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            if data.get("shouldType"):
+                await s.type_text("Yes")
+                await asyncio.sleep(0.1)
+                await s.press_enter()
+                ts = time.strftime("%H:%M:%S")
+                q = data.get("question", "")[:120]
+                print(
+                    f"[{ts}] TEXT-CONFIRM on '{prt}/{page.title[:40]}' typed='Yes' question={q!r}",
+                    flush=True,
+                )
+                return 1
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{prt}/{page.title[:40]}] text-confirm error: {e}", flush=True)
+    return 0
+
+
 @app.command()
 def watch(
     port: Annotated[
@@ -114,6 +140,7 @@ def watch(
     js_cd = countdown_js(countdown) if use_countdown else ""
     js_cd_codex = countdown_codex_js(countdown) if use_countdown else ""
     js_cd_claude = countdown_claude_js(countdown) if use_countdown else ""
+    js_text_confirm = detect_chat_text_confirm_js(countdown)
     ports = list(port) if port else [9222]
 
     def _summarize_click(p_title: str, data: dict) -> int:
@@ -180,7 +207,15 @@ def watch(
                             _state.add_clicks(prt, cd_n)
                             if once:
                                 return
-                    else:
+
+                    # --- Text-based confirmation questions (both modes) ---
+                    tc_n = await _handle_text_confirm(p, prt, js_text_confirm)
+                    if tc_n:
+                        _state.add_clicks(prt, tc_n)
+                        if once:
+                            return
+
+                    if not use_countdown:
                         # Instant mode: existing handlers.
                         try:
                             async with CDPSession(p.ws_url) as s:
@@ -227,6 +262,7 @@ def watch(
                             _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
                             return
                         _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
+
                 # Scan iframe targets for Codex/Claude prompts (webview-hosted UI).
                 try:
                     all_targets = await list_targets(port=prt)
