@@ -153,7 +153,7 @@ class Yes2AllApp(rumps.App):
         self.countdown: float = cfg.get("countdown", 0)
 
         self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
-        self.sweep_item = rumps.MenuItem("Cycle Cursor tabs", callback=self.on_toggle_sweep)
+        self.sweep_item = rumps.MenuItem("Cycle Cursor Tabs", callback=self.on_toggle_sweep)
         self.sweep_item.state = 1 if self.sweep_tabs else 0
 
         # Flash state: when the watcher reports a click, briefly swap the
