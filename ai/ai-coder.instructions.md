@@ -2,6 +2,14 @@
 
 Project-specific directions captured from the user. Update this file whenever the user provides new implementation-relevant information (setup, debugging, testing, preferences).
 
+## Platform support
+
+- Core functionality (`watch`, `probe`, `targets`) is cross-platform (macOS, Linux, Windows).
+- `service install/uninstall/status` works on macOS (launchd) and Linux (systemd). Windows users run `watch` manually or use Task Scheduler.
+- y2a-menubar is macOS-only (`rumps` + AppKit). The `menubar` CLI command has a platform guard.
+- `state.py` uses `_data_dir()` for platform-appropriate paths: `~/Library/Application Support/yes2all/` (macOS), `$XDG_DATA_HOME/yes2all/` (Linux), `%APPDATA%/yes2all/` (Windows).
+- `install-macos.sh` is macOS-only (bash + launchctl). `install-linux.sh` is the Linux equivalent (bash + systemd). `install-win.bat` is the Windows equivalent (runs y2a-service foreground, targets, probe).
+
 ## Development Environment
 
 - **Cursor** is currently running locally with `--remote-debugging-port=9222`.
@@ -29,7 +37,8 @@ Project-specific directions captured from the user. Update this file whenever th
 - To activate a tab, `tab.click()` is insufficient — the workbench listens for **mousedown** on tabs. Dispatch a real `MouseEvent("mousedown")` (then mouseup/click) at the tab's center to switch.
 - Detect that the new chat actually re-rendered by snapshotting `.composer-bar` innerText before activation and waiting until the tab is `.active` AND the composer text changes (poll up to ~1.2s, then 150ms settle).
 - After scanning each non-active tab, restore the originally-active tab so the user isn't disrupted.
-- The `watch` CLI defaults to `--sweep-tabs` which calls `SWEEP_TABS_AND_CLICK_JS`; `--no-sweep-tabs` falls back to active-tab-only.
+- The `watch` CLI defaults to `--no-sweep-tabs` (active-tab-only); `--sweep-tabs` enables cycling through inactive Cursor chat tabs.
+- Default countdown is 3 seconds (badge shown before clicking).
 
 ## Daemon
 
@@ -54,8 +63,8 @@ Project-specific directions captured from the user. Update this file whenever th
 - Module: `src/yes2all/menubar.py` using `rumps` (added to deps as macOS-only). Run foreground with `uv run yes2all menubar`.
 - LaunchAgent label `com.yes2all.menubar`, plist at `~/Library/LaunchAgents/`. `LimitLoadToSessionType=Aqua` so it only runs in the GUI session.
 - Install/remove auto-start: `uv run yes2all service install-menubar` / `uninstall-menubar`. Logs at `~/Library/Logs/yes2all/menubar.{out,err}.log`.
-- Title icon: `✓` watcher loaded, `○` not loaded. Polls `launchctl list` every 3s.
-- Menu: Start / Stop / Cycle Cursor tabs (toggle, reinstalls watcher) / Open log / Quit.
+- Title icon: `✓` service loaded, `○` not loaded. Polls `launchctl list` every 3s.
+- Menu: Start / Stop / Cycle Cursor tabs (toggle, reinstalls service) / Open log / Quit.
 
 ## Hide Python from Dock
 
@@ -67,18 +76,18 @@ Project-specific directions captured from the user. Update this file whenever th
 - Inside it: `div.chat-question-list` (role=`listbox`, aria-label `confirm`) containing `div.chat-question-list-item[role="option"]` elements with `aria-label="Option N: <label>"`. Affirmative is typically option #1 (e.g. "Yes, run it"); negative is e.g. "Stop". Footer hint: `⌘↵ to submit`.
 - Submit anchor: `a.monaco-button.chat-question-submit` (sibling anchors `chat-question-close` and `chat-question-collapse-toggle` are NOT submit — exclude them).
 - Handler: `CLICK_CHAT_QUESTION_JS` in `finder.py`. Picks the first option matching `^(yes|allow|approve|accept|run|continue|confirm|ok)\b` (skipping any matching `^(no|stop|cancel|deny|reject|skip)\b`), real-event-clicks the option to select it, then real-event-clicks the submit button (fallback: dispatches Cmd+Enter on the listbox).
-- Watcher runs both the Cursor finder AND `CLICK_CHAT_QUESTION_JS` per page each tick. Verified live on port 9333 with a real "Run touch ~/tmp.file?" prompt.
+- The service runs both the Cursor finder AND `CLICK_CHAT_QUESTION_JS` per page each tick. Verified live on port 9333 with a real "Run touch ~/tmp.file?" prompt.
 
 ## VS Code Copilot Chat confirmation widget (Allow / Skip)
 
 - Second VS Code prompt variant: `div.chat-confirmation-widget-container` (aria-label `Chat Confirmation Dialog ...`). Inner button row: `div.chat-confirmation-widget-buttons` containing `a.monaco-button.monaco-text-button` "Allow" (aria-label `Allow (⌘Enter)`, often inside a `.monaco-button-dropdown` split-button) and `a.monaco-button.secondary.monaco-text-button` "Skip" (aria-label `Proceed without executing this command (⌥⌘Enter)`).
 - Handler: `CLICK_CHAT_CONFIRMATION_JS`. Iterates each widget, picks first non-`secondary`, non-`monaco-dropdown-button` `monaco-button` whose label matches the positive regex; never clicks anything matching the negative regex. Real-event-clicks (mousedown/mouseup/click).
 - The original Cursor finder also matches "Allow" (because `monaco-button` is in `CLICKABLE_CLASS_FRAGMENTS` and "Allow" is in `VERBS`) but the dedicated handler is safer because it explicitly excludes `.secondary` and split-button chevrons.
-- Watcher loop now evaluates three handlers per page per tick: cursor finder (or sweep), `CLICK_CHAT_QUESTION_JS`, `CLICK_CHAT_CONFIRMATION_JS`.
+- Service loop now evaluates three handlers per page per tick: cursor finder (or sweep), `CLICK_CHAT_QUESTION_JS`, `CLICK_CHAT_CONFIRMATION_JS`.
 
-## Multi-port watcher
+## Multi-port service
 
-- `yes2all watch --port 9222 --port 9333 ...` polls multiple CDP endpoints in a single watcher process, looping ports each tick.
+- `yes2all watch --port 9222 --port 9333 ...` polls multiple CDP endpoints in a single process, looping ports each tick.
 - `yes2all service install --port 9222 --port 9333` writes both `--port` args into the launchd plist `ProgramArguments` array (and into systemd `ExecStart`).
 - Internal API change: `service.install(ports: list[int], interval, sweep_tabs)`, `launchd_plist(ports, ...)`, `systemd_unit(ports, ...)`. Menubar app defaults to `[9222, 9333]`.
 - Per-tick log lines now include the port: `CLICKED on '9333/Welcome' ...`.
@@ -91,25 +100,25 @@ Project-specific directions captured from the user. Update this file whenever th
 ## Menubar port checkboxes
 
 - Menubar exposes a "Ports" submenu with a checkbox per known port (`PORT_CHOICES`: Cursor 9222, VS Code 9333).
-- Toggling a checkbox updates `self.ports` and, if the watcher is loaded, reinstalls the LaunchAgent with the new port list.
+- Toggling a checkbox updates `self.ports` and, if the service is loaded, reinstalls the LaunchAgent with the new port list.
 - Refuses to uncheck the last enabled port.
 - Checkbox state is also re-synced from the plist on every status tick.
 
 ## Menubar config persistence
 
-- Settings changed via the menubar (ports, interval, sweep_tabs, countdown, apps) are saved to `~/Library/Application Support/yes2all/config.json` via `state.write_config()`.
-- On startup, the menubar hydrates from `config.json` first, then overrides from the installed plist if the watcher is running.
-- This means settings survive even when the watcher is stopped — no more "install then uninstall" hack to persist port changes.
+- Settings changed via the menubar (ports, interval, sweep_tabs, countdown, apps) are saved to the platform data dir (`state._data_dir() / config.json`) via `state.write_config()`. On macOS: `~/Library/Application Support/yes2all/`, on Linux: `$XDG_DATA_HOME/yes2all/`, on Windows: `%APPDATA%/yes2all/`.
+- On startup, the menubar hydrates from `config.json` first, then overrides from the installed plist if the service is running.
+- This means settings survive even when the service is stopped — no more "install then uninstall" hack to persist port changes.
 - `state.py` exports `read_config()` and `write_config()` alongside the existing `read_counts()`/`write_counts()`.
 
-## Menubar app launchers
+## y2a-menubar launchers
 
 - "Launch" submenu with configurable entries: each has `name` (display), `app` (macOS app name for `open -a`), `port` (debug port).
 - Default entries: Cursor (:9222), VS Code (:9333). Stored in config.json under `apps` key.
 - Launches via `open -a <app> --args --remote-debugging-port=<port>`.
 - "Add App…" and "Edit Apps…" menu items for adding/editing entries. Edit shows a multi-line text area with one `name, app, port` per line.
 
-## Menubar app auto-detection
+## y2a-menubar auto-detection
 
 - Menubar labels for ports are now live-detected via `GET http://127.0.0.1:<port>/json/version`.
 
@@ -122,7 +131,7 @@ Project-specific directions captured from the user. Update this file whenever th
 - Both Cursor and VS Code report `Browser: "Chrome/..."` — the discriminator is the `User-Agent` token (`Cursor/x.y.z` or `Code/x.y.z`).
 - Label format: `"Cursor (9222)"` when running, `"Cursor (offline)" (9222)` when port is closed. Refreshed on every status tick (3s).
 
-## Menubar app icon
+## y2a-menubar icon
 
 - Custom checkmark template icon at `src/yes2all/assets/icon.png` (22px, 44px @2x) and `icon-large.png` (128px for the About dialog).
 - Generated via `uv run --with pillow python ...` (one-off; Pillow is not a runtime dep).
@@ -169,14 +178,14 @@ Project-specific directions captured from the user. Update this file whenever th
 - Stopped/unloaded state shows a hairline open circle instead of the checkmark; new assets `icon-off-{dark,light}{,@2x}.png`.
 - `menubar._menu_icon(loaded)` picks the right of four icons based on `(loaded, system_is_dark)`.
 
-## Watcher port gotcha
+## Service port gotcha
 
-- The watcher only polls ports passed via `--port`. If a click handler "doesn't fire" for VS Code, first verify `9333` is in the installed launchd plist's `ProgramArguments` (or in the menubar's "Ports" submenu). Default install command: `uv run yes2all service install --port 9222 --port 9333 --port 9444 --interval 0.5`.
+- The service only polls ports passed via `--port`. If a click handler "doesn't fire" for VS Code, first verify `9333` is in the installed launchd plist's `ProgramArguments` (or in the menubar's "Ports" submenu). Default install command: `uv run yes2all service install --port 9222 --port 9333 --interval 1`.
 
 ## Known ports
 
-- `KNOWN_PORTS` in `menubar.py`: `(9222, "Cursor")`, `(9333, "VS Code")`, `(9444, "VS Code Codex")`.
-- Default ports fallback (no plist): `[9222, 9333, 9444]`.
+- `KNOWN_PORTS` in `menubar.py`: `(9222, "Cursor")`, `(9333, "VS Code")`.
+- Default ports fallback (no plist): `[9222, 9333]`.
 
 ## Carousel auto-pick fallback
 
@@ -187,4 +196,4 @@ Project-specific directions captured from the user. Update this file whenever th
 - VS Code Codex extension (`openai.chatgpt`) renders its approval UI inside a webview iframe, not in the main page DOM.
 - The prompt is inside a nested `#active-frame` iframe within the webview. Radio options are `button[role="radio"][type="submit"]` with `aria-label` like "Yes", "Yes, and don't ask again for commands that start with …". A separate "Submit ⏎" button confirms, and a "Skip" button declines.
 - Handler: `CLICK_CODEX_PROMPT_JS` in `finder.py`. Runs on **iframe** CDP targets (not page targets). Selects the first radio whose `aria-label` starts with "Yes", then clicks Submit.
-- Watcher loop now also iterates `list_targets()` for iframe-type targets on each port per tick and evaluates `CLICK_CODEX_PROMPT_JS` on each.
+- Service loop now also iterates `list_targets()` for iframe-type targets on each port per tick and evaluates `CLICK_CODEX_PROMPT_JS` on each.
