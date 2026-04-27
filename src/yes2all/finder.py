@@ -61,11 +61,30 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     return m ? m[0] : line;
   }
 
+  // Stricter than firstWord: the visible text must look like a button, not
+  // a phrase. Letter-runs after the verb may only be single-letter shortcut
+  // keys (e.g. the "Y" in "Run⌥⌘Y"). Rejects "Run MCP attempted",
+  // "Run command in terminal?", etc.
+  function strictVerbMatch(txt) {
+    const runs = txt.match(/[A-Za-z]+/g) || [];
+    if (runs.length === 0) return false;
+    if (!VERBS.includes(runs[0])) return false;
+    for (let i = 1; i < runs.length; i++) if (runs[i].length > 1) return false;
+    return true;
+  }
+
   // Class fragments seen on clickable approval buttons across editor builds.
   const CLICKABLE_CLASS_FRAGMENTS = [
     "monaco-button", "action-label",
     "anysphere-button", "composer-run-button",
     "ui-button", "ui-shell-tool-call__run-btn",
+  ];
+  // Subset of CLICKABLE_CLASS_FRAGMENTS that uniquely identify Cursor's
+  // affirmative approval button. The verb in the label varies by tool
+  // (Run / Fetch / Read / Edit / ...), so when these classes are present we
+  // skip the verb whitelist.
+  const APPROVAL_BUTTON_CLASSES = [
+    "composer-run-button", "ui-shell-tool-call__run-btn",
   ];
 
   function looksClickable(el) {
@@ -78,6 +97,13 @@ FIND_APPROVAL_BUTTONS_JS = r"""
       for (const c of CLICKABLE_CLASS_FRAGMENTS) {
         if (el.classList.contains(c)) return true;
       }
+    }
+    return false;
+  }
+  function isApprovalSpecific(el) {
+    if (!(el instanceof Element) || !el.classList) return false;
+    for (const c of APPROVAL_BUTTON_CLASSES) {
+      if (el.classList.contains(c)) return true;
     }
     return false;
   }
@@ -128,13 +154,14 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     if (!(node instanceof Element)) continue;
     const txt = textOf(node);
     if (!txt) continue;
-    const word = firstWord(txt);
-    if (!VERBS.includes(word)) continue;
     // Avoid matching giant text containers: cap visible text length at 40 chars
     // so we don't match an entire chat message that happens to start with "Run".
     if (txt.length > 40) continue;
     const target = clickableAncestor(node);
     if (!target) continue;
+    // Accept if this is a Cursor-specific approval button (verb varies),
+    // otherwise require the visible text to pass the strict verb match.
+    if (!isApprovalSpecific(target) && !strictVerbMatch(txt)) continue;
     if (seen.has(target)) continue;
     seen.add(target);
     if (!visible(target)) continue;
@@ -163,6 +190,7 @@ COUNTDOWN_BADGE_JS = r"""
   const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button",
     "composer-run-button", "ui-button", "ui-shell-tool-call__run-btn"];
+  const APPROVAL_BUTTON_CLASSES = ["composer-run-button", "ui-shell-tool-call__run-btn"];
   const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
   const BADGE_ATTR = "data-y2a-deadline";
@@ -184,11 +212,23 @@ COUNTDOWN_BADGE_JS = r"""
     const m = (t.split(/[\s\n\r]+/)[0] || "").match(/^[A-Za-z]+/);
     return m ? m[0] : "";
   }
+  function strictVerbMatch(txt) {
+    const runs = txt.match(/[A-Za-z]+/g) || [];
+    if (runs.length === 0) return false;
+    if (!VERBS.includes(runs[0])) return false;
+    for (let i = 1; i < runs.length; i++) if (runs[i].length > 1) return false;
+    return true;
+  }
   function looksClickable(el) {
     if (!(el instanceof Element)) return false;
     if (el.tagName === "BUTTON") return true;
     if ((el.getAttribute("role") || "") === "button") return true;
     if (el.classList) for (const c of CLICKABLE_FRAGS) if (el.classList.contains(c)) return true;
+    return false;
+  }
+  function isApprovalSpecific(el) {
+    if (!(el instanceof Element) || !el.classList) return false;
+    for (const c of APPROVAL_BUTTON_CLASSES) if (el.classList.contains(c)) return true;
     return false;
   }
   function clickableAncestor(el) {
@@ -233,11 +273,13 @@ COUNTDOWN_BADGE_JS = r"""
     if (!(node instanceof Element)) continue;
     const txt = ((node.innerText || node.textContent) || "").trim();
     if (!txt) continue;
-    const word = firstWord(txt);
-    if (!VERBS.includes(word)) continue;
     if (txt.length > 40) continue;
     const t = clickableAncestor(node);
-    if (!t || seen.has(t) || !visible(t)) continue;
+    if (!t) continue;
+    // Accept if this is a Cursor-specific approval button (verb varies per
+    // tool: Run, Fetch, Read, ...), otherwise require a strict verb match.
+    if (!isApprovalSpecific(t) && !strictVerbMatch(txt)) continue;
+    if (seen.has(t) || !visible(t)) continue;
     seen.add(t);
 
     let deadline = parseInt(t.getAttribute(BADGE_ATTR) || "0", 10);
@@ -822,7 +864,8 @@ CLICK_CHAT_CONFIRMATION_JS = r"""
 SWEEP_TABS_AND_CLICK_JS = r"""
 (async () => {
   const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
-  const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button", "composer-run-button"];
+  const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button", "composer-run-button", "ui-button", "ui-shell-tool-call__run-btn"];
+  const APPROVAL_BUTTON_CLASSES = ["composer-run-button", "ui-shell-tool-call__run-btn"];
 
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
@@ -880,12 +923,26 @@ SWEEP_TABS_AND_CLICK_JS = r"""
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
     };
   }
+  function strictVerbMatch(txt) {
+    const runs = txt.match(/[A-Za-z]+/g) || [];
+    if (runs.length === 0) return false;
+    if (!VERBS.includes(runs[0])) return false;
+    for (let i = 1; i < runs.length; i++) if (runs[i].length > 1) return false;
+    return true;
+  }
+  function isApprovalSpecific(el) {
+    if (!(el instanceof Element) || !el.classList) return false;
+    for (const c of APPROVAL_BUTTON_CLASSES) if (el.classList.contains(c)) return true;
+    return false;
+  }
   function findApproval() {
     for (const node of document.querySelectorAll("*")) {
       const txt = textOf(node);
-      if (!txt || !VERBS.includes(txt)) continue;
+      if (!txt || txt.length > 40) continue;
       const target = clickableAncestor(node);
       if (!target || !visible(target)) continue;
+      // Cursor-specific approval class (verb varies: Run, Fetch, ...) OR strict verb match.
+      if (!isApprovalSpecific(target) && !strictVerbMatch(txt)) continue;
       return target;
     }
     return null;

@@ -208,6 +208,18 @@ Project-specific directions captured from the user. Update this file whenever th
 - Handler: `CLICK_CODEX_PROMPT_JS` in `finder.py`. Runs on **iframe** CDP targets (not page targets). Selects the first radio whose `aria-label` starts with "Yes", then clicks Submit.
 - Service loop now also iterates `list_targets()` for iframe-type targets on each port per tick and evaluates `CLICK_CODEX_PROMPT_JS` on each.
 
+## Class-based approval-button match for arbitrary verbs (fixed 2026-04-26)
+
+- Cursor's MCP / shell tool-call approval button uses the *tool's* verb in its label — not just `Run`. Examples seen: `Fetch ⏎` (HTTP fetch), and presumably `Read`, `Edit`, `Search`, etc. The verb whitelist (`Run`, `Allow`, `Approve`, `Accept`, `Yes`, `Submit`) was too narrow.
+- Fix: any element matching the Cursor-specific approval classes `composer-run-button` or `ui-shell-tool-call__run-btn` is treated as an approval button regardless of inner text. New helper `isApprovalSpecific(el)` short-circuits the verb check. Strict verb match still applies as fallback for non-Cursor UIs (Allow / Yes / Submit on Copilot widgets etc.).
+- Applied in `FIND_APPROVAL_BUTTONS_JS`, `COUNTDOWN_BADGE_JS`, and `SWEEP_TABS_AND_CLICK_JS`. Also added the missing `ui-button` and `ui-shell-tool-call__run-btn` to `CLICKABLE_FRAGS` in the sweep variant (was lagging behind the main finder).
+
+## Verb-match tightening: `Run MCP attempted` false positive (fixed 2026-04-26)
+
+- Cursor renders a collapsible status header `<div role="button">Run MCP attempted</div>` after a previously-approved MCP tool call completes. The old `firstWord("Run MCP attempted") === "Run"` check matched it as an approval button, so the watcher would hammer those headers and ignore the actual `composer-run-button` Run button next to the new pending MCP approval.
+- Fix: replaced `firstWord` + `txt.length > 40` gate with a stricter `strictVerbMatch(txt)`: collect all `[A-Za-z]+` runs in the visible text; the first run must be in `VERBS`, and any subsequent runs must be ≤ 1 char (so single-letter shortcut keys like the `Y` in `Run⌥⌘Y` are still allowed). This rejects multi-word phrases like `Run MCP attempted`, `Run command in terminal?`, etc.
+- Applied in both `FIND_APPROVAL_BUTTONS_JS` and `COUNTDOWN_BADGE_JS` (Cursor-style section).
+
 ## Countdown propagation bug (fixed)
 
 - `service.py` used to omit `--countdown` from the launchd plist when countdown was 0 (`if countdown > 0`). Since the CLI `watch` command defaults `--countdown` to `3`, omitting it meant the watcher always used 3s regardless of the menubar setting.
