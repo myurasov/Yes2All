@@ -151,7 +151,7 @@ class Yes2AllApp(rumps.App):
         self.interval: float = cfg.get("interval", 1)
         self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
         self.countdown: float = cfg.get("countdown", 0)
-        self.max_defer: float = cfg.get("max_defer", 300)
+        self.max_defer: float = cfg.get("max_defer", 0)
 
         self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
         self.sweep_item = rumps.MenuItem("Cycle Cursor Tabs", callback=self.on_toggle_sweep)

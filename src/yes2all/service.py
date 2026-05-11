@@ -55,7 +55,7 @@ def read_installed_args() -> dict | None:
         interval = 1
         sweep_tabs = True
         countdown = 0.0
-        max_defer = 300.0
+        max_defer = 0.0
         i = 0
         while i < len(args):
             a = args[i]
@@ -111,7 +111,7 @@ def launchd_plist(
     log_dir: Path,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 300,
+    max_defer: float = 0,
 ) -> str:
     exe = _yes2all_executable()
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -149,7 +149,7 @@ def launchd_install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 300,
+    max_defer: float = 0,
 ) -> None:
     plist_path = launchd_plist_path()
     log_dir = Path.home() / "Library" / "Logs" / "yes2all"
@@ -291,7 +291,7 @@ def systemd_unit(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 300,
+    max_defer: float = 0,
 ) -> str:
     exe = _yes2all_executable()
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
@@ -317,7 +317,7 @@ def systemd_install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 300,
+    max_defer: float = 0,
 ) -> None:
     unit_path = systemd_unit_path()
     unit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -364,7 +364,7 @@ def install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 300,
+    max_defer: float = 0,
 ) -> None:
     sysname = platform.system()
     if sysname == "Darwin":

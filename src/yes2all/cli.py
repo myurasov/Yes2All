@@ -141,7 +141,7 @@ def watch(
             help="Max seconds to defer auto-click while user is typing in a chat input "
             "(0=disable deferring; click immediately even while typing).",
         ),
-    ] = 300,
+    ] = 0,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
     use_countdown = countdown > 0
@@ -359,7 +359,7 @@ def service_install(
             "--max-defer",
             help="Max seconds to defer auto-click while user is typing (0=disable deferring).",
         ),
-    ] = 300,
+    ] = 0,
 ) -> None:
     """Install + start Yes2All as a background service (launchd / systemd --user)."""
     svc.install(
