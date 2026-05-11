@@ -251,6 +251,13 @@ Project-specific directions captured from the user. Update this file whenever th
 - Threaded through `service.install/launchd_install/systemd_install/launchd_plist/systemd_unit/read_installed_args` and the menubar (`max_defer` is read/written in `config.json` and passed to every `svc.install(...)` call).
 - Menubar UI: `Settings ▸ Max defer while typing: <N>s…` opens a `rumps.Window` for editing. Validates non-negative; 0 disables. On apply: `_save_config()` + `_reinstall_if_loaded()`. About dialog now also shows `Max defer: <N>s`.
 
+## Pause / Resume via SIGSTOP / SIGCONT (2026-05-10)
+
+- The menubar's toggle item is now `Start` / `Pause` / `Resume` (three states), not `Start` / `Stop`. The previous "Stop" unloaded the LaunchAgent; "Pause" instead sends `SIGSTOP` to the watcher process so the plist stays loaded (and `KeepAlive=true` doesn't respawn it — SIGSTOP doesn't kill, it suspends).
+- Helpers in `service.py`: `launchd_pid()` (parses `"PID" = N;` from `launchctl list <label>`), `launchd_is_paused()` (checks `ps -p <pid> -o state=` for leading `T`), `launchd_pause()` (`kill -STOP`), `launchd_resume()` (`kill -CONT`).
+- Menubar `_refresh_status` picks the label: not-loaded → `Start`; loaded + paused → `Resume`; loaded + running → `Pause`. The menu-bar icon uses the active-state checkmark only when running (paused looks the same as unloaded — the menu label disambiguates).
+- `on_quit` now resumes the watcher (if SIGSTOP'd) before calling `svc.uninstall()`, so `launchctl unload`'s SIGTERM is actually delivered. Quit still removes both LaunchAgents (watcher + menubar) and exits — to bring everything back: `uv run yes2all service install-menubar`.
+
 ## Add Port menu bug (fixed 2026-05-10)
 
 - `on_add_port` referenced `self.menu["Ports"]` but the submenu had been renamed to `"Watched Ports"`. rumps swallows callback `KeyError`s and logs them to `~/Library/Logs/yes2all/menubar.err.log`, so the bug was silent: the port wasn't appearing in the menu (and `_save_config()` / `_reinstall_if_loaded()` never ran in that handler — the plist/config got updated through some other path, e.g. a re-add or a `_refresh_status` tick).

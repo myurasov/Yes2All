@@ -247,9 +247,16 @@ class Yes2AllApp(rumps.App):
 
     def _refresh_status(self) -> None:
         loaded = _is_loaded()
+        paused = loaded and svc.launchd_is_paused()
+        active = loaded and not paused
         if not self._flash_until:
-            self.icon = _menu_icon(loaded)
-        self.toggle_item.title = "Stop" if loaded else "Start"
+            self.icon = _menu_icon(active)
+        if not loaded:
+            self.toggle_item.title = "Start"
+        elif paused:
+            self.toggle_item.title = "Resume"
+        else:
+            self.toggle_item.title = "Pause"
         # Re-hydrate from plist so CLI-driven changes (ports/interval/sweep)
         # are reflected the next time the menu reinstalls the watcher.
         cfg = svc.read_installed_args()
@@ -336,10 +343,12 @@ class Yes2AllApp(rumps.App):
 
     # ----- actions -------------------------------------------------------
     def on_toggle(self, _: object) -> None:
-        if _is_loaded():
-            self.on_stop(None)
-        else:
+        if not _is_loaded():
             self.on_start(None)
+        elif svc.launchd_is_paused():
+            self.on_resume(None)
+        else:
+            self.on_pause(None)
 
     def on_start(self, _: object) -> None:
         self._save_config()
@@ -361,14 +370,23 @@ class Yes2AllApp(rumps.App):
             f"ports {self.ports}, every {self.interval}s, cycle tabs={'on' if self.sweep_tabs else 'off'}",
         )
 
-    def on_stop(self, _: object) -> None:
+    def on_pause(self, _: object) -> None:
         try:
-            svc.uninstall()
+            svc.launchd_pause()
         except Exception as e:  # noqa: BLE001
-            rumps.notification("Yes2All", "Stop failed", str(e))
+            rumps.notification("Yes2All", "Pause failed", str(e))
             return
         self._refresh_status()
-        rumps.notification("Yes2All", "Stopped", "y2a-service unloaded")
+        rumps.notification("Yes2All", "Paused", "y2a-service suspended (SIGSTOP)")
+
+    def on_resume(self, _: object) -> None:
+        try:
+            svc.launchd_resume()
+        except Exception as e:  # noqa: BLE001
+            rumps.notification("Yes2All", "Resume failed", str(e))
+            return
+        self._refresh_status()
+        rumps.notification("Yes2All", "Resumed", "y2a-service running")
 
     def on_toggle_sweep(self, item: rumps.MenuItem) -> None:
         self.sweep_tabs = not self.sweep_tabs
@@ -702,11 +720,17 @@ class Yes2AllApp(rumps.App):
         )
 
     def on_quit(self, _: object) -> None:
-        # Stop the watcher first, then quit the menu-bar app itself.
-        # Also remove the menu-bar LaunchAgent so launchd won't immediately
-        # respawn this process (KeepAlive=true).
+        # Unload the watcher first, then remove the menu-bar LaunchAgent so
+        # launchd won't immediately respawn this process (KeepAlive=true).
+        # If the watcher is currently SIGSTOP'd (Pause), resume it first so
+        # `launchctl unload`'s SIGTERM is actually delivered.
         try:
             if _is_loaded():
+                try:
+                    if svc.launchd_is_paused():
+                        svc.launchd_resume()
+                except Exception:
+                    pass
                 svc.uninstall()
         except Exception:
             pass

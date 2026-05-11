@@ -203,6 +203,60 @@ def launchd_status() -> None:
         print(f"not loaded ({LABEL})")
 
 
+def launchd_pid() -> int | None:
+    """Return the watcher process PID if the LaunchAgent is loaded, else None.
+
+    Parses `launchctl list <label>` output: looks for a `"PID" = <n>;` line.
+    """
+    r = subprocess.run(["launchctl", "list", LABEL], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
+        s = line.strip().rstrip(";").strip()
+        if s.startswith('"PID"'):
+            _, _, rhs = s.partition("=")
+            try:
+                return int(rhs.strip())
+            except ValueError:
+                return None
+    return None
+
+
+def launchd_is_paused() -> bool:
+    """Return True if the watcher process is currently SIGSTOP'd (state `T`)."""
+    pid = launchd_pid()
+    if pid is None:
+        return False
+    r = subprocess.run(["ps", "-p", str(pid), "-o", "state="], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        return False
+    return r.stdout.strip().startswith("T")
+
+
+def launchd_pause() -> None:
+    """SIGSTOP the watcher process — keeps the LaunchAgent loaded but suspends work.
+
+    Unlike `launchctl unload`, this doesn't remove the plist or let launchd
+    respawn the process. SIGSTOP persists until SIGCONT.
+    """
+    pid = launchd_pid()
+    if pid is None:
+        raise RuntimeError("watcher is not running")
+    r = subprocess.run(["kill", "-STOP", str(pid)], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(f"kill -STOP {pid} failed: {r.stderr.strip() or r.stdout.strip()}")
+
+
+def launchd_resume() -> None:
+    """SIGCONT the watcher process."""
+    pid = launchd_pid()
+    if pid is None:
+        raise RuntimeError("watcher is not running")
+    r = subprocess.run(["kill", "-CONT", str(pid)], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        raise RuntimeError(f"kill -CONT {pid} failed: {r.stderr.strip() or r.stdout.strip()}")
+
+
 # ----- macOS menu-bar app LaunchAgent -----------------------------------------
 
 MENUBAR_LABEL = "com.yes2all.menubar"
