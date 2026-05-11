@@ -220,6 +220,49 @@ Project-specific directions captured from the user. Update this file whenever th
 - Fix: replaced `firstWord` + `txt.length > 40` gate with a stricter `strictVerbMatch(txt)`: collect all `[A-Za-z]+` runs in the visible text; the first run must be in `VERBS`, and any subsequent runs must be ≤ 1 char (so single-letter shortcut keys like the `Y` in `Run⌥⌘Y` are still allowed). This rejects multi-word phrases like `Run MCP attempted`, `Run command in terminal?`, etc.
 - Applied in both `FIND_APPROVAL_BUTTONS_JS` and `COUNTDOWN_BADGE_JS` (Cursor-style section).
 
+## Focus preservation across synthetic clicks (2026-05-09)
+
+- Symptom: when an approval is clicked in chat A, the user's caret was getting yanked out of whatever chat input they were typing in (could be a different Cursor chat tab, a VS Code chat, etc., all in the **same** editor window). Cause: Cursor/VS Code's React handlers re-focus the chat that owned the just-clicked button after the click fires, which displaces `document.activeElement`. CDP synthetic events do **not** steal OS-level focus across apps — this is purely an in-page focus shift.
+- First attempt (insufficient on its own): each same-page click handler (`COUNTDOWN_BADGE_JS`, `CLICK_CHAT_QUESTION_JS`, `CLICK_CHAT_CONFIRMATION_JS`, `SWEEP_TABS_AND_CLICK_JS`) now snapshots `document.activeElement` + selection range at the top of its IIFE and schedules `setTimeout(__y2aRestoreFocus, 0)` + an 80–120 ms backup after each `realClick`. Capture is once per script invocation (closure-scoped) so multi-click flows still reference the *original* user focus. Skips restore when the saved element is `body`/`documentElement` or has been disconnected (`isConnected`).
+- Failure mode that motivated the second fix: in cross-tab Cursor scenarios (typing in chat A, approval pending in inactive chat B), sweep mode is the only way to click B. But activating B unmounts chat A's React tree, so the saved `__y2aOrigActive` becomes a disconnected node and `.focus()` is a no-op. Refocus from a stale reference cannot survive Cursor's tab unmount/remount lifecycle.
+- Real fix — **defer-while-typing**: each same-page handler now also has a `userIsTyping()` helper. It returns true when `document.activeElement` is an `<input>` / `<textarea>` / `[contenteditable]` inside a known chat-input container (`.composer-bar`, `.chat-editor-container`, `.interactive-session`, `.chat-widget`, `[class*='chat-editor']`, `[class*='composer-input']`).
+  - `SWEEP_TABS_AND_CLICK_JS` / `CLICK_CHAT_QUESTION_JS` / `CLICK_CHAT_CONFIRMATION_JS`: bail out at the top when typing — return `{deferred: "user-typing"}` immediately (no tab activation, no clicks).
+  - `COUNTDOWN_BADGE_JS`: when `remaining <= 0`, if typing, keep the badge at "0" and leave `BADGE_ATTR` in place (no countdown reset). Click fires the moment the user pauses — within one watcher interval (~1s).
+- Approvals fire as soon as the user pauses or clicks elsewhere; the deadline is preserved so the countdown doesn't visibly reset.
+- Iframe-hosted handlers (Codex `CLICK_CODEX_PROMPT_JS`, Claude `CLICK_CLAUDE_PROMPT_JS` / `COUNTDOWN_CLAUDE_BADGE_JS`) are **not** patched — those run inside webview iframes whose `document.activeElement` is not the user's outer-page chat input, so neither the focus-restore nor the `userIsTyping` heuristic would see the real input. Revisit if focus-loss reports come in for those.
+- Reload required after edits: `uv run yes2all service uninstall && uv run yes2all service install --port 9222 --port 9333 --interval 1` (or use the menubar Stop/Start).
+
+## Cursor's actual chat-input class (verified via CDP probe 2026-05-10)
+
+- The focused chat-input in Cursor is `<div class="aislash-editor-input" contenteditable="true" role="textbox">`. Its ancestor classes (in order from closest): `aislash-editor-grid` → `monaco-scrollable-element  mac` → `scrollable-div-container smooth-height` → `ai-input-full-input-box full-input-box` → `composer-input-blur-wrapper` → ...
+- `[class*='composer-input']` matches `composer-input-blur-wrapper`, so the existing `userIsTyping()` heuristic worked on Cursor — **but** only handlers that actually had the heuristic. The substring also explains why VS Code's `.chat-editor-container [role='textbox']` matches.
+- Added `[class*='aislash-editor']` to the heuristic for belt-and-suspenders.
+
+## userIsTyping coverage extended to CLICK_FIRST_APPROVAL_JS (2026-05-10)
+
+- Symptom (logs at `~/Library/Logs/yes2all/yes2all.out.log`): with `countdown=0 sweep_tabs=False interval=0.333`, the watcher logged `CLICKED on '9222/...' (active) tool='?'` ~3× per second, stealing focus every tick. This is the `CLICK_FIRST_APPROVAL_JS` path which I had not gated.
+- Fix: added `userIsTyping()` + a `__DEFER_IF_TYPING` flag at the top of `FIND_APPROVAL_BUTTONS_JS`. The flag is `false` in the read-only `find` variant (so debug commands still return matches) and is rewritten to `true` via a `.replace()` in the `CLICK_FIRST_APPROVAL_JS` substitution. When typing, the click variant returns `{count: 0, buttons: [], deferred: "user-typing"}` early.
+- Verified via live CDP probe on port 9222 with the user's caret in the Cursor chat input: `CLICK_FIRST_APPROVAL_JS` returned the deferred payload.
+- Iframe handlers (Codex / Claude inside VS Code webviews) still unpatched — their CDP target is the iframe doc, not the outer page where the user's chat input lives. If those report focus loss, the right place to gate is in `cli.py`: query the page target for `userIsTyping` once per port per tick and skip iframe handlers for that port if true.
+
+## Max-defer timeout for type-deferring (2026-05-10)
+
+- New CLI flag `--max-defer N` on `yes2all watch` and `yes2all service install` (default `300`). `0` disables type-deferring (clicks fire immediately even while typing). Persisted in launchd plist / systemd unit ExecStart.
+- Threaded through `service.install/launchd_install/systemd_install/launchd_plist/systemd_unit/read_installed_args` and the menubar (`max_defer` is read/written in `config.json` and passed to every `svc.install(...)` call).
+- Menubar UI: `Settings ▸ Max defer while typing: <N>s…` opens a `rumps.Window` for editing. Validates non-negative; 0 disables. On apply: `_save_config()` + `_reinstall_if_loaded()`. About dialog now also shows `Max defer: <N>s`.
+
+## Add Port menu bug (fixed 2026-05-10)
+
+- `on_add_port` referenced `self.menu["Ports"]` but the submenu had been renamed to `"Watched Ports"`. rumps swallows callback `KeyError`s and logs them to `~/Library/Logs/yes2all/menubar.err.log`, so the bug was silent: the port wasn't appearing in the menu (and `_save_config()` / `_reinstall_if_loaded()` never ran in that handler — the plist/config got updated through some other path, e.g. a re-add or a `_refresh_status` tick).
+- Fix: new `_rebuild_ports_submenu()` clears the submenu and re-adds (checkboxes → separator → Add Port… → Reset Counters). Called from `on_add_port` after the new `port_items[prt]` entry is created. Avoids `insert_before(rumps.separator, ...)` which doesn't work — separators have no key for rumps to look up.
+- JS plumbing in `finder.py`: each gated handler now calls `shouldDeferForTyping()` instead of `userIsTyping()`. The new helper:
+  - Reads `__Y2A_MAX_DEFER_MS` (substituted from `__MAX_DEFER_MS__` placeholder).
+  - Returns `false` immediately when `__Y2A_MAX_DEFER_MS === 0` (always click).
+  - When the user has focus in a chat input, stamps `<html data-y2a-defer-start="<ms>">` on first defer; subsequent ticks compare `now - start` against the max; once exceeded, clears the attribute and returns `false` (click fires through).
+  - When focus moves out of any chat input, clears the attribute so the next typing session starts a fresh timer.
+- Helper `with_max_defer(js, secs)` in `finder.py` does the placeholder substitution. Call sites in `cli.py`: `js`, `js_cd`, `js_chat_question`, `js_chat_confirmation`. Iframe handlers (Codex / Claude) remain unpatched.
+- Verified live via CDP: `with_max_defer(CLICK_FIRST_APPROVAL_JS, 300)` returns `{deferred:"user-typing"}` while typing; `with_max_defer(FIND_APPROVAL_BUTTONS_JS, 0)` proceeds normally.
+
 ## Countdown propagation bug (fixed)
 
 - `service.py` used to omit `--countdown` from the launchd plist when countdown was 0 (`if countdown > 0`). Since the CLI `watch` command defaults `--countdown` to `3`, omitting it meant the watcher always used 3s regardless of the menubar setting.

@@ -27,6 +27,7 @@ from .finder import (
     countdown_codex_js,
     countdown_js,
     detect_chat_text_confirm_js,
+    with_max_defer,
 )
 
 app = typer.Typer(add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code.")
@@ -133,14 +134,24 @@ def watch(
         float,
         typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
     ] = 3,
+    max_defer: Annotated[
+        float,
+        typer.Option(
+            "--max-defer",
+            help="Max seconds to defer auto-click while user is typing in a chat input "
+            "(0=disable deferring; click immediately even while typing).",
+        ),
+    ] = 300,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
     use_countdown = countdown > 0
-    js = SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS
-    js_cd = countdown_js(countdown) if use_countdown else ""
+    js = with_max_defer(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, max_defer)
+    js_cd = with_max_defer(countdown_js(countdown), max_defer) if use_countdown else ""
     js_cd_codex = countdown_codex_js(countdown) if use_countdown else ""
     js_cd_claude = countdown_claude_js(countdown) if use_countdown else ""
     js_text_confirm = detect_chat_text_confirm_js(countdown)
+    js_chat_question = with_max_defer(CLICK_CHAT_QUESTION_JS, max_defer)
+    js_chat_confirmation = with_max_defer(CLICK_CHAT_CONFIRMATION_JS, max_defer)
     ports = list(port) if port else [9222]
 
     def _summarize_click(p_title: str, data: dict) -> int:
@@ -172,7 +183,7 @@ def watch(
     async def _run() -> None:
         print(
             f"watching ports {ports} every {interval}s "
-            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s) ...",
+            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, max_defer={max_defer}s) ...",
             flush=True,
         )
         while True:
@@ -220,8 +231,8 @@ def watch(
                         try:
                             async with CDPSession(p.ws_url) as s:
                                 raw = await s.evaluate(js)
-                                raw_cq = await s.evaluate(CLICK_CHAT_QUESTION_JS)
-                                raw_cc = await s.evaluate(CLICK_CHAT_CONFIRMATION_JS)
+                                raw_cq = await s.evaluate(js_chat_question)
+                                raw_cc = await s.evaluate(js_chat_confirmation)
                         except Exception as e:
                             print(f"  [{prt}/{p.title[:40]}] error: {e}", flush=True)
                             continue
@@ -342,6 +353,13 @@ def service_install(
         float,
         typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
     ] = 3,
+    max_defer: Annotated[
+        float,
+        typer.Option(
+            "--max-defer",
+            help="Max seconds to defer auto-click while user is typing (0=disable deferring).",
+        ),
+    ] = 300,
 ) -> None:
     """Install + start Yes2All as a background service (launchd / systemd --user)."""
     svc.install(
@@ -349,6 +367,7 @@ def service_install(
         interval,
         sweep_tabs=sweep_tabs,
         countdown=countdown,
+        max_defer=max_defer,
     )
 
 

@@ -37,9 +37,10 @@ def launchd_plist_path() -> Path:
 
 
 def read_installed_args() -> dict | None:
-    """Parse the installed launchd plist and return {ports, interval, sweep_tabs, countdown}.
+    """Parse the installed launchd plist.
 
-    Returns None if no plist is installed or it can't be parsed.
+    Returns dict with keys ``ports``, ``interval``, ``sweep_tabs``, ``countdown``,
+    ``max_defer`` (or ``None`` if no plist is installed / can't be parsed).
     """
     p = launchd_plist_path()
     if not p.exists():
@@ -54,6 +55,7 @@ def read_installed_args() -> dict | None:
         interval = 1
         sweep_tabs = True
         countdown = 0.0
+        max_defer = 300.0
         i = 0
         while i < len(args):
             a = args[i]
@@ -78,6 +80,13 @@ def read_installed_args() -> dict | None:
                     pass
                 i += 2
                 continue
+            if a == "--max-defer" and i + 1 < len(args):
+                try:
+                    max_defer = float(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+                continue
             if a == "--sweep-tabs":
                 sweep_tabs = True
             elif a == "--no-sweep-tabs":
@@ -90,6 +99,7 @@ def read_installed_args() -> dict | None:
             "interval": interval,
             "sweep_tabs": sweep_tabs,
             "countdown": countdown,
+            "max_defer": max_defer,
         }
     except Exception:
         return None
@@ -101,6 +111,7 @@ def launchd_plist(
     log_dir: Path,
     sweep_tabs: bool = True,
     countdown: float = 0,
+    max_defer: float = 300,
 ) -> str:
     exe = _yes2all_executable()
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -109,6 +120,7 @@ def launchd_plist(
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
     port_args = "\n    ".join(f"<string>--port</string>   <string>{p}</string>" for p in ports)
     countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>"
+    max_defer_args = f"\n    <string>--max-defer</string><string>{max_defer}</string>"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -120,7 +132,7 @@ def launchd_plist(
     <string>watch</string>
     {port_args}
     <string>--interval</string><string>{interval}</string>
-    <string>{sweep_flag}</string>{countdown_args}
+    <string>{sweep_flag}</string>{countdown_args}{max_defer_args}
   </array>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
@@ -132,11 +144,19 @@ def launchd_plist(
 """
 
 
-def launchd_install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
+def launchd_install(
+    ports: list[int],
+    interval: float,
+    sweep_tabs: bool = True,
+    countdown: float = 0,
+    max_defer: float = 300,
+) -> None:
     plist_path = launchd_plist_path()
     log_dir = Path.home() / "Library" / "Logs" / "yes2all"
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(launchd_plist(ports, interval, log_dir, sweep_tabs=sweep_tabs, countdown=countdown))
+    plist_path.write_text(
+        launchd_plist(ports, interval, log_dir, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
+    )
     print(f"wrote {plist_path}")
     # Reload if already loaded, then load.
     subprocess.run(
@@ -266,17 +286,24 @@ def systemd_unit_path() -> Path:
     return Path.home() / ".config" / "systemd" / "user" / f"{LABEL}.service"
 
 
-def systemd_unit(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> str:
+def systemd_unit(
+    ports: list[int],
+    interval: float,
+    sweep_tabs: bool = True,
+    countdown: float = 0,
+    max_defer: float = 300,
+) -> str:
     exe = _yes2all_executable()
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
     port_args = " ".join(f"--port {p}" for p in ports)
     countdown_arg = f" --countdown {countdown}"
+    max_defer_arg = f" --max-defer {max_defer}"
     return f"""[Unit]
 Description=Yes2All — auto-approve agent tool prompts in Cursor / VS Code
 After=graphical-session.target
 
 [Service]
-ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}
+ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}{max_defer_arg}
 Restart=always
 RestartSec=2
 
@@ -285,10 +312,16 @@ WantedBy=default.target
 """
 
 
-def systemd_install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
+def systemd_install(
+    ports: list[int],
+    interval: float,
+    sweep_tabs: bool = True,
+    countdown: float = 0,
+    max_defer: float = 300,
+) -> None:
     unit_path = systemd_unit_path()
     unit_path.parent.mkdir(parents=True, exist_ok=True)
-    unit_path.write_text(systemd_unit(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown))
+    unit_path.write_text(systemd_unit(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer))
     print(f"wrote {unit_path}")
     for cmd in (
         ["systemctl", "--user", "daemon-reload"],
@@ -326,12 +359,18 @@ def systemd_status() -> None:
 # ----- dispatch ---------------------------------------------------------------
 
 
-def install(ports: list[int], interval: float, sweep_tabs: bool = True, countdown: float = 0) -> None:
+def install(
+    ports: list[int],
+    interval: float,
+    sweep_tabs: bool = True,
+    countdown: float = 0,
+    max_defer: float = 300,
+) -> None:
     sysname = platform.system()
     if sysname == "Darwin":
-        launchd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown)
+        launchd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
     elif sysname == "Linux":
-        systemd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown)
+        systemd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
     else:
         raise RuntimeError(
             f"Unsupported platform for service install: {sysname}. On Windows, use Task Scheduler manually for now."

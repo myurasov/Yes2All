@@ -151,6 +151,7 @@ class Yes2AllApp(rumps.App):
         self.interval: float = cfg.get("interval", 1)
         self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
         self.countdown: float = cfg.get("countdown", 0)
+        self.max_defer: float = cfg.get("max_defer", 300)
 
         self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
         self.sweep_item = rumps.MenuItem("Cycle Cursor Tabs", callback=self.on_toggle_sweep)
@@ -184,9 +185,10 @@ class Yes2AllApp(rumps.App):
             ports_menu.add(mi)
         ports_menu.add(rumps.separator)
         ports_menu.add(rumps.MenuItem("Add Port…", callback=self.on_add_port))
-        ports_menu.add(rumps.MenuItem("Reset counters", callback=self.on_reset_counters))
+        ports_menu.add(rumps.MenuItem("Reset Counters", callback=self.on_reset_counters))
         self.interval_item = rumps.MenuItem(self._interval_title(), callback=self.on_set_interval)
         self.countdown_item = rumps.MenuItem(self._countdown_title(), callback=self.on_set_countdown)
+        self.max_defer_item = rumps.MenuItem(self._max_defer_title(), callback=self.on_set_max_defer)
 
         # App launchers — configurable list of editor apps + debug ports.
         self.apps: list[dict] = cfg.get("apps") or [
@@ -210,6 +212,7 @@ class Yes2AllApp(rumps.App):
         settings_menu.add(self.interval_item)
         settings_menu.add(self.countdown_item)
         settings_menu.add(self.sweep_item)
+        settings_menu.add(self.max_defer_item)
 
         self.menu = [
             self.toggle_item,
@@ -217,7 +220,7 @@ class Yes2AllApp(rumps.App):
             settings_menu,
             self._launch_menu,
             ports_menu,
-            rumps.MenuItem("Tail log in Terminal", callback=self.on_open_log),
+            rumps.MenuItem("Tail Log in Terminal", callback=self.on_open_log),
             None,
             rumps.MenuItem("About Yes2All", callback=self.on_about),
             rumps.MenuItem("Quit Yes2All", callback=self.on_quit),
@@ -255,9 +258,11 @@ class Yes2AllApp(rumps.App):
             self.interval = cfg["interval"]
             self.sweep_tabs = cfg["sweep_tabs"]
             self.countdown = cfg.get("countdown", 0)
+            self.max_defer = cfg.get("max_defer", self.max_defer)
             self.sweep_item.state = 1 if self.sweep_tabs else 0
             self.interval_item.title = self._interval_title()
             self.countdown_item.title = self._countdown_title()
+            self.max_defer_item.title = self._max_defer_title()
         # Re-detect app on each known port and refresh checkbox label/state.
         known_ports_set = {p for p, _ in KNOWN_PORTS}
         for (prt, default_name), mi in zip(KNOWN_PORTS, [self.port_items[p] for p, _ in KNOWN_PORTS], strict=True):
@@ -268,7 +273,7 @@ class Yes2AllApp(rumps.App):
             if prt not in known_ports_set:
                 detected = _detect_app(prt) or f"Port {prt}"
                 n = _state.read_counts().get(prt, 0)
-                suffix = f": {n} approved" if n else ""
+                suffix = f": {n:,} approved" if n else ""
                 mi.title = f"{detected} ({prt}){suffix}"
                 mi.state = 1 if prt in self.ports else 0
 
@@ -276,7 +281,7 @@ class Yes2AllApp(rumps.App):
         detected = _detect_app(prt)
         name = detected or f"{default_name} (offline)"
         n = _state.read_counts().get(prt, 0)
-        suffix = f": {n} approved" if n else ""
+        suffix = f": {n:,} approved" if n else ""
         return f"{name} ({prt}){suffix}"
 
     # ----- actions -------------------------------------------------------
@@ -299,7 +304,13 @@ class Yes2AllApp(rumps.App):
             if _is_loaded():
                 try:
                     svc.uninstall()
-                    svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs, countdown=self.countdown)
+                    svc.install(
+                        self.ports,
+                        self.interval,
+                        sweep_tabs=self.sweep_tabs,
+                        countdown=self.countdown,
+                        max_defer=self.max_defer,
+                    )
                 except Exception as e:  # noqa: BLE001
                     rumps.notification("Yes2All", "Reinstall failed", str(e))
                     return
@@ -307,6 +318,21 @@ class Yes2AllApp(rumps.App):
                 rumps.notification("Yes2All", "Ports updated", f"watching {self.ports}")
 
         return _cb
+
+    def _rebuild_ports_submenu(self) -> None:
+        """Reset the Watched Ports submenu so dynamically-added ports show up.
+
+        rumps doesn't allow `insert_before` on separators (they have no key),
+        so the simplest correct option is to clear and re-add in order:
+        port checkboxes → separator → Add Port… → Reset Counters.
+        """
+        ports_menu = self.menu["Watched Ports"]
+        ports_menu.clear()
+        for mi in self.port_items.values():
+            ports_menu.add(mi)
+        ports_menu.add(rumps.separator)
+        ports_menu.add(rumps.MenuItem("Add Port…", callback=self.on_add_port))
+        ports_menu.add(rumps.MenuItem("Reset Counters", callback=self.on_reset_counters))
 
     # ----- actions -------------------------------------------------------
     def on_toggle(self, _: object) -> None:
@@ -318,7 +344,13 @@ class Yes2AllApp(rumps.App):
     def on_start(self, _: object) -> None:
         self._save_config()
         try:
-            svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs, countdown=self.countdown)
+            svc.install(
+                self.ports,
+                self.interval,
+                sweep_tabs=self.sweep_tabs,
+                countdown=self.countdown,
+                max_defer=self.max_defer,
+            )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Start failed", str(e))
             return
@@ -346,7 +378,13 @@ class Yes2AllApp(rumps.App):
             # Apply by reinstalling.
             try:
                 svc.uninstall()
-                svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs, countdown=self.countdown)
+                svc.install(
+                    self.ports,
+                    self.interval,
+                    sweep_tabs=self.sweep_tabs,
+                    countdown=self.countdown,
+                    max_defer=self.max_defer,
+                )
             except Exception as e:  # noqa: BLE001
                 rumps.notification("Yes2All", "Reinstall failed", str(e))
                 return
@@ -370,6 +408,11 @@ class Yes2AllApp(rumps.App):
             return f"Countdown: {self.countdown:.0f}s\u2026"
         return "Countdown: off\u2026"
 
+    def _max_defer_title(self) -> str:
+        if self.max_defer > 0:
+            return f"Max Typing Defer: {self.max_defer:.0f}s\u2026"
+        return "Max Typing Defer: off\u2026"
+
     def _save_config(self) -> None:
         write_config(
             {
@@ -377,6 +420,7 @@ class Yes2AllApp(rumps.App):
                 "interval": self.interval,
                 "sweep_tabs": self.sweep_tabs,
                 "countdown": self.countdown,
+                "max_defer": self.max_defer,
                 "apps": self.apps,
             }
         )
@@ -487,7 +531,13 @@ class Yes2AllApp(rumps.App):
             return False
         try:
             svc.uninstall()
-            svc.install(self.ports, self.interval, sweep_tabs=self.sweep_tabs, countdown=self.countdown)
+            svc.install(
+                self.ports,
+                self.interval,
+                sweep_tabs=self.sweep_tabs,
+                countdown=self.countdown,
+                max_defer=self.max_defer,
+            )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Reinstall failed", str(e))
             return False
@@ -525,8 +575,9 @@ class Yes2AllApp(rumps.App):
             mi = rumps.MenuItem(f"{detected} ({prt})", callback=self._make_port_toggle(prt))
             mi.state = 1
             self.port_items[prt] = mi
-            # Insert before the separator (after existing port checkboxes).
-            self.menu["Ports"].insert_before(rumps.separator, mi)
+            self._rebuild_ports_submenu()
+        else:
+            self.port_items[prt].state = 1
 
         self._save_config()
         if self._reinstall_if_loaded():
@@ -592,6 +643,36 @@ class Yes2AllApp(rumps.App):
         if self._reinstall_if_loaded():
             rumps.notification("Yes2All", "Countdown updated", self._countdown_title())
 
+    def on_set_max_defer(self, _: object) -> None:
+        win = rumps.Window(
+            title="Set Max Typing Defer",
+            message=(
+                "Maximum seconds to defer auto-clicks while you have focus in a chat input.\n"
+                "After this many seconds the click fires even if you're still typing.\n"
+                "Set to 0 to disable deferring (always click immediately)."
+            ),
+            default_text=str(int(self.max_defer) if self.max_defer == int(self.max_defer) else self.max_defer),
+            ok="Apply",
+            cancel="Cancel",
+            dimensions=(120, 22),
+        )
+        win.icon = ICON_LARGE_LIGHT if _system_is_dark() else ICON_LARGE_DARK
+        resp = win.run()
+        if not resp.clicked:
+            return
+        try:
+            val = float(resp.text.strip())
+            if val < 0:
+                raise ValueError
+        except ValueError:
+            rumps.alert("Invalid Max Defer", "Enter a non-negative number of seconds (0 disables).")
+            return
+        self.max_defer = val
+        self.max_defer_item.title = self._max_defer_title()
+        self._save_config()
+        if self._reinstall_if_loaded():
+            rumps.notification("Yes2All", "Max Typing Defer updated", self._max_defer_title())
+
     def on_about(self, _: object) -> None:
         try:
             from importlib.metadata import version as _pkg_version
@@ -608,6 +689,7 @@ class Yes2AllApp(rumps.App):
             f"Ports:   {ports_str}\n"
             f"Interval: {self.interval}s\n"
             f"Countdown: {self.countdown:.0f}s\n"
+            f"Max typing defer: {self.max_defer:.0f}s\n"
             f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n\n"
             f"© Mikhail Yurasov <me@yurasov.me>\n"
             f"Apache License 2.0"

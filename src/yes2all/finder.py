@@ -14,6 +14,54 @@ FIND_APPROVAL_BUTTONS_JS = r"""
   const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const results = [];
 
+  // Defer auto-clicks while the user is mid-typing in a chat input. The
+  // `__DEFER_IF_TYPING` flag is `false` in the read-only `find` variant and
+  // is rewritten to `true` in `CLICK_FIRST_APPROVAL_JS`. See the substitution
+  // below.
+  function userIsTyping() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return false;
+    const tag = a.tagName;
+    const ce = a.isContentEditable === true;
+    if (!(tag === "INPUT" || tag === "TEXTAREA" || ce)) return false;
+    return !!(a.closest && (
+      a.closest(".composer-bar") ||
+      a.closest(".chat-editor-container") ||
+      a.closest(".interactive-session") ||
+      a.closest(".chat-widget") ||
+      a.closest("[class*='chat-editor']") ||
+      a.closest("[class*='composer-input']") ||
+      a.closest("[class*='aislash-editor']")
+    ));
+  }
+  // Max time to defer a pending auto-click while the user keeps focus in a
+  // chat input. 0 disables deferral entirely (always click). The starting
+  // moment is stored on `<html data-y2a-defer-start>` so it survives across
+  // ticks; it's cleared whenever the user moves focus away.
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!userIsTyping()) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
+  }
+  const __DEFER_IF_TYPING = false;
+  if (__DEFER_IF_TYPING && shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, buttons: [], deferred: "user-typing"});
+  }
+
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
     if (el.getAttribute && el.getAttribute("aria-hidden") === "true") return false;
@@ -175,6 +223,9 @@ FIND_APPROVAL_BUTTONS_JS = r"""
 CLICK_FIRST_APPROVAL_JS = FIND_APPROVAL_BUTTONS_JS.replace(
     "results.push(describe(target));",
     "results.push(describe(target)); target.click(); break;",
+).replace(
+    "const __DEFER_IF_TYPING = false;",
+    "const __DEFER_IF_TYPING = true;",
 )
 
 
@@ -236,6 +287,31 @@ COUNTDOWN_BADGE_JS = r"""
     for (let i = 0; i < 8 && cur; i++) { if (looksClickable(cur)) return cur; cur = cur.parentElement; }
     return null;
   }
+
+  // Snapshot focus + selection so we can restore them after our synthetic
+  // clicks. Cursor/VS Code re-focus the chat that owned the just-clicked
+  // approval button, which would otherwise pull the caret out of whatever
+  // chat the user is typing in.
+  const __y2aOrigActive = document.activeElement;
+  let __y2aOrigRange = null;
+  try {
+    const __sel = document.getSelection();
+    if (__sel && __sel.rangeCount > 0) __y2aOrigRange = __sel.getRangeAt(0).cloneRange();
+  } catch (_) {}
+  function __y2aRestoreFocus() {
+    try {
+      const cur = document.activeElement;
+      if (__y2aOrigActive && __y2aOrigActive !== cur && __y2aOrigActive.isConnected
+          && __y2aOrigActive !== document.body && __y2aOrigActive !== document.documentElement) {
+        __y2aOrigActive.focus({ preventScroll: true });
+        if (__y2aOrigRange) {
+          const s = document.getSelection();
+          if (s) { try { s.removeAllRanges(); s.addRange(__y2aOrigRange); } catch (_) {} }
+        }
+      }
+    } catch (_) {}
+  }
+
   function fire(el, type, init) {
     el.dispatchEvent(new MouseEvent(type, Object.assign(
       {bubbles:true, cancelable:true, view:window, button:0}, init||{})));
@@ -245,6 +321,49 @@ COUNTDOWN_BADGE_JS = r"""
     const x = r.x + r.width/2, y = r.y + r.height/2;
     const o = {clientX:x, clientY:y};
     fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+    setTimeout(__y2aRestoreFocus, 0);
+    setTimeout(__y2aRestoreFocus, 80);
+  }
+
+  // Returns true if the user has focus inside a chat input. We use this to
+  // defer auto-clicks while the user is mid-thought — refocusing after the
+  // click can fail (the saved element may have been unmounted by Cursor's
+  // tab/React lifecycle), so the safer option is to just wait one tick.
+  function userIsTyping() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return false;
+    const tag = a.tagName;
+    const ce = a.isContentEditable === true;
+    if (!(tag === "INPUT" || tag === "TEXTAREA" || ce)) return false;
+    return !!(a.closest && (
+      a.closest(".composer-bar") ||
+      a.closest(".chat-editor-container") ||
+      a.closest(".interactive-session") ||
+      a.closest(".chat-widget") ||
+      a.closest("[class*='chat-editor']") ||
+      a.closest("[class*='composer-input']") ||
+      a.closest("[class*='aislash-editor']")
+    ));
+  }
+  // See FIND_APPROVAL_BUTTONS_JS for the deferral-timer rationale. 0 disables.
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!userIsTyping()) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
   }
 
   const BADGE_CSS = "display:inline-flex;align-items:center;justify-content:center;" +
@@ -287,9 +406,14 @@ COUNTDOWN_BADGE_JS = r"""
     const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
     const badge = ensureBadge(t);
     if (remaining <= 0) {
-      badge.remove(); t.removeAttribute(BADGE_ATTR);
-      realClick(t);
-      clicked.push({text: ((t.innerText || "").trim()).slice(0, 80)});
+      if (shouldDeferForTyping()) {
+        badge.textContent = "0";
+        pending.push({text: ((t.innerText || "").trim()).slice(0, 80), remaining: 0, deferred: true});
+      } else {
+        badge.remove(); t.removeAttribute(BADGE_ATTR);
+        realClick(t);
+        clicked.push({text: ((t.innerText || "").trim()).slice(0, 80)});
+      }
     } else {
       badge.textContent = String(remaining);
       pending.push({text: ((t.innerText || "").trim()).slice(0, 80), remaining});
@@ -331,17 +455,22 @@ COUNTDOWN_BADGE_JS = r"""
     const badge = ensureBadge(badgeTarget);
     const label = (chosen.querySelector(".chat-question-list-label")?.innerText || chosen.innerText || "").trim().slice(0, 80);
     if (remaining <= 0) {
-      badge.remove(); badgeTarget.removeAttribute(BADGE_ATTR);
-      if (!chosen.classList.contains("selected")) realClick(chosen);
-      if (submitBtn && visible(submitBtn)) {
-        realClick(submitBtn);
+      if (shouldDeferForTyping()) {
+        badge.textContent = "0";
+        pending.push({text: label, remaining: 0, deferred: true});
       } else {
-        const list = c.querySelector(".chat-question-list") || c;
-        const k = {key:"Enter", code:"Enter", keyCode:13, which:13, metaKey:true, bubbles:true, cancelable:true};
-        list.dispatchEvent(new KeyboardEvent("keydown", k));
-        list.dispatchEvent(new KeyboardEvent("keyup", k));
+        badge.remove(); badgeTarget.removeAttribute(BADGE_ATTR);
+        if (!chosen.classList.contains("selected")) realClick(chosen);
+        if (submitBtn && visible(submitBtn)) {
+          realClick(submitBtn);
+        } else {
+          const list = c.querySelector(".chat-question-list") || c;
+          const k = {key:"Enter", code:"Enter", keyCode:13, which:13, metaKey:true, bubbles:true, cancelable:true};
+          list.dispatchEvent(new KeyboardEvent("keydown", k));
+          list.dispatchEvent(new KeyboardEvent("keyup", k));
+        }
+        clicked.push({text: label});
       }
-      clicked.push({text: label});
     } else {
       // Select the option visually so user sees what will be submitted.
       if (!chosen.classList.contains("selected")) realClick(chosen);
@@ -376,9 +505,14 @@ COUNTDOWN_BADGE_JS = r"""
     const badge = ensureBadge(chosenBtn);
     const label = ((chosenBtn.innerText || chosenBtn.textContent) || "").trim().slice(0, 80);
     if (remaining <= 0) {
-      badge.remove(); chosenBtn.removeAttribute(BADGE_ATTR);
-      realClick(chosenBtn);
-      clicked.push({text: label});
+      if (shouldDeferForTyping()) {
+        badge.textContent = "0";
+        pending.push({text: label, remaining: 0, deferred: true});
+      } else {
+        badge.remove(); chosenBtn.removeAttribute(BADGE_ATTR);
+        realClick(chosenBtn);
+        clicked.push({text: label});
+      }
     } else {
       badge.textContent = String(remaining);
       pending.push({text: label, remaining});
@@ -717,6 +851,68 @@ CLICK_CHAT_QUESTION_JS = r"""
   const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
 
+  // Preserve user's focus/caret across our synthetic clicks (see COUNTDOWN_BADGE_JS).
+  const __y2aOrigActive = document.activeElement;
+  let __y2aOrigRange = null;
+  try {
+    const __sel = document.getSelection();
+    if (__sel && __sel.rangeCount > 0) __y2aOrigRange = __sel.getRangeAt(0).cloneRange();
+  } catch (_) {}
+  function __y2aRestoreFocus() {
+    try {
+      const cur = document.activeElement;
+      if (__y2aOrigActive && __y2aOrigActive !== cur && __y2aOrigActive.isConnected
+          && __y2aOrigActive !== document.body && __y2aOrigActive !== document.documentElement) {
+        __y2aOrigActive.focus({ preventScroll: true });
+        if (__y2aOrigRange) {
+          const s = document.getSelection();
+          if (s) { try { s.removeAllRanges(); s.addRange(__y2aOrigRange); } catch (_) {} }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Defer entire handler if user is currently typing in a chat input.
+  function userIsTyping() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return false;
+    const tag = a.tagName;
+    const ce = a.isContentEditable === true;
+    if (!(tag === "INPUT" || tag === "TEXTAREA" || ce)) return false;
+    return !!(a.closest && (
+      a.closest(".composer-bar") ||
+      a.closest(".chat-editor-container") ||
+      a.closest(".interactive-session") ||
+      a.closest(".chat-widget") ||
+      a.closest("[class*='chat-editor']") ||
+      a.closest("[class*='composer-input']") ||
+      a.closest("[class*='aislash-editor']")
+    ));
+  }
+  // See FIND_APPROVAL_BUTTONS_JS for the deferral-timer rationale. 0 disables.
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!userIsTyping()) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
+  }
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, results: [], deferred: "user-typing"});
+  }
+
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
     const r = el.getBoundingClientRect();
@@ -733,6 +929,8 @@ CLICK_CHAT_QUESTION_JS = r"""
     const x = r.x + r.width/2, y = r.y + r.height/2;
     const o = {clientX:x, clientY:y};
     fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+    setTimeout(__y2aRestoreFocus, 0);
+    setTimeout(__y2aRestoreFocus, 80);
   }
 
   const results = [];
@@ -806,6 +1004,68 @@ CLICK_CHAT_CONFIRMATION_JS = r"""
   const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
 
+  // Preserve user's focus/caret across our synthetic clicks (see COUNTDOWN_BADGE_JS).
+  const __y2aOrigActive = document.activeElement;
+  let __y2aOrigRange = null;
+  try {
+    const __sel = document.getSelection();
+    if (__sel && __sel.rangeCount > 0) __y2aOrigRange = __sel.getRangeAt(0).cloneRange();
+  } catch (_) {}
+  function __y2aRestoreFocus() {
+    try {
+      const cur = document.activeElement;
+      if (__y2aOrigActive && __y2aOrigActive !== cur && __y2aOrigActive.isConnected
+          && __y2aOrigActive !== document.body && __y2aOrigActive !== document.documentElement) {
+        __y2aOrigActive.focus({ preventScroll: true });
+        if (__y2aOrigRange) {
+          const s = document.getSelection();
+          if (s) { try { s.removeAllRanges(); s.addRange(__y2aOrigRange); } catch (_) {} }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Defer entire handler if user is currently typing in a chat input.
+  function userIsTyping() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return false;
+    const tag = a.tagName;
+    const ce = a.isContentEditable === true;
+    if (!(tag === "INPUT" || tag === "TEXTAREA" || ce)) return false;
+    return !!(a.closest && (
+      a.closest(".composer-bar") ||
+      a.closest(".chat-editor-container") ||
+      a.closest(".interactive-session") ||
+      a.closest(".chat-widget") ||
+      a.closest("[class*='chat-editor']") ||
+      a.closest("[class*='composer-input']") ||
+      a.closest("[class*='aislash-editor']")
+    ));
+  }
+  // See FIND_APPROVAL_BUTTONS_JS for the deferral-timer rationale. 0 disables.
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!userIsTyping()) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
+  }
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, results: [], deferred: "user-typing"});
+  }
+
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
     const r = el.getBoundingClientRect();
@@ -822,6 +1082,8 @@ CLICK_CHAT_CONFIRMATION_JS = r"""
     const x = r.x + r.width/2, y = r.y + r.height/2;
     const o = {clientX:x, clientY:y};
     fire(el, "mousedown", o); fire(el, "mouseup", o); fire(el, "click", o);
+    setTimeout(__y2aRestoreFocus, 0);
+    setTimeout(__y2aRestoreFocus, 80);
   }
 
   const results = [];
@@ -866,6 +1128,71 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const CLICKABLE_FRAGS = ["monaco-button", "action-label", "anysphere-button", "composer-run-button", "ui-button", "ui-shell-tool-call__run-btn"];
   const APPROVAL_BUTTON_CLASSES = ["composer-run-button", "ui-shell-tool-call__run-btn"];
+
+  // Preserve user's focus/caret across tab activation + synthetic clicks.
+  const __y2aOrigActive = document.activeElement;
+  let __y2aOrigRange = null;
+  try {
+    const __sel = document.getSelection();
+    if (__sel && __sel.rangeCount > 0) __y2aOrigRange = __sel.getRangeAt(0).cloneRange();
+  } catch (_) {}
+  function __y2aRestoreFocus() {
+    try {
+      const cur = document.activeElement;
+      if (__y2aOrigActive && __y2aOrigActive !== cur && __y2aOrigActive.isConnected
+          && __y2aOrigActive !== document.body && __y2aOrigActive !== document.documentElement) {
+        __y2aOrigActive.focus({ preventScroll: true });
+        if (__y2aOrigRange) {
+          const s = document.getSelection();
+          if (s) { try { s.removeAllRanges(); s.addRange(__y2aOrigRange); } catch (_) {} }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // If the user is currently typing in any chat input, skip this entire sweep:
+  // tab activation unmounts the chat the user is in (the previously-active
+  // tab), which destroys the contenteditable they were typing into. Refocusing
+  // can't recover from that — the safer move is to wait one tick.
+  function userIsTyping() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return false;
+    const tag = a.tagName;
+    const ce = a.isContentEditable === true;
+    if (!(tag === "INPUT" || tag === "TEXTAREA" || ce)) return false;
+    return !!(a.closest && (
+      a.closest(".composer-bar") ||
+      a.closest(".chat-editor-container") ||
+      a.closest(".interactive-session") ||
+      a.closest(".chat-widget") ||
+      a.closest("[class*='chat-editor']") ||
+      a.closest("[class*='composer-input']") ||
+      a.closest("[class*='aislash-editor']")
+    ));
+  }
+  // See FIND_APPROVAL_BUTTONS_JS for the deferral-timer rationale. 0 disables.
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!userIsTyping()) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
+  }
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({ clicked: 0, results: [], deferred: "user-typing" });
+  }
 
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
@@ -956,6 +1283,8 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   if (btn) {
     const d = describe(btn);
     btn.click();
+    setTimeout(__y2aRestoreFocus, 0);
+    setTimeout(__y2aRestoreFocus, 80);
     results.push({ tab: "<active>", clicked: d });
     return JSON.stringify({ clicked: results.length, results });
   }
@@ -1006,6 +1335,10 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   if (originallyActive && !originallyActive.classList.contains("active")) {
     try { activateTab(originallyActive); } catch (_) {}
   }
+
+  // 4) Restore the user's focus/caret after all tab activations + clicks.
+  setTimeout(__y2aRestoreFocus, 0);
+  setTimeout(__y2aRestoreFocus, 120);
 
   return JSON.stringify({ clicked: results.filter(r => r.clicked).length, results });
 })()
@@ -1221,3 +1554,14 @@ DETECT_CHAT_TEXT_CONFIRM_JS = r"""
 def detect_chat_text_confirm_js(seconds: float) -> str:
     """Return DETECT_CHAT_TEXT_CONFIRM_JS with countdown placeholder replaced."""
     return DETECT_CHAT_TEXT_CONFIRM_JS.replace("__COUNTDOWN_SECS__", str(seconds))
+
+
+def with_max_defer(js: str, max_defer_seconds: float) -> str:
+    """Substitute __MAX_DEFER_MS__ in *js* with the configured timeout.
+
+    `max_defer_seconds == 0` disables the type-defer guard entirely (the JS
+    handler clicks immediately even when the user has focus in a chat input).
+    Other values are converted to milliseconds for the JS timer.
+    """
+    ms = int(max(0.0, float(max_defer_seconds)) * 1000)
+    return js.replace("__MAX_DEFER_MS__", str(ms))
