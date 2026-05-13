@@ -274,3 +274,14 @@ Project-specific directions captured from the user. Update this file whenever th
 
 - `service.py` used to omit `--countdown` from the launchd plist when countdown was 0 (`if countdown > 0`). Since the CLI `watch` command defaults `--countdown` to `3`, omitting it meant the watcher always used 3s regardless of the menubar setting.
 - Fix: always write `--countdown <value>` to both the launchd plist and systemd unit, even when 0.
+
+## Cursor 3.3 PointerEvent requirement (fixed 2026-05-13)
+
+- Cursor 3.3.30 (Electron 39 / Chromium 142) finally broke the `target.click()` and MouseEvent-only paths. The `composer-run-button` (and the newer `ui-shell-tool-call__run-btn`) now sits under a React root that listens for **PointerEvent** first; bare `.click()` and even a `mousedown`+`mouseup`+`click` MouseEvent triplet are silent no-ops. Symptom: watcher logs `CLICKED` every tick on the same rect but the prompt never disappears (verified with the user's Playwright MCP "Run Browser Click" approval on port 9222).
+- Two click sites had this bug:
+  - `CLICK_FIRST_APPROVAL_JS` substitution (the `countdown=0` path) was `target.click(); break;`.
+  - `SWEEP_TABS_AND_CLICK_JS` used `btn.click()` for both the active-tab fast path and the per-tab branch.
+- Fix: dispatch the full sequence `pointerdown → mousedown → pointerup → mouseup → click` at the element's center, with `composed:true`, `view:window`, `clientX/Y` + `screenX/Y`, `buttons:1` on the down phase and `buttons:0` on the up phase, and `pointerType:'mouse'` / `pointerId:1` / `isPrimary:true` for the pointer events. The shared `_REAL_CLICK_SNIPPET` Python constant is substituted into `CLICK_FIRST_APPROVAL_JS`; `SWEEP_TABS_AND_CLICK_JS` defines a JS `realClick(el)` helper with the same sequence (and aliases `activateTab = realClick` since tabs use the same listener model).
+- `COUNTDOWN_BADGE_JS`'s internal `realClick` was already mostly-correct (mousedown/mouseup/click) but is still MouseEvent-only — not touched here because the user has `countdown=0`; revisit if the countdown path stops dismissing prompts on Cursor 3.3+.
+- Verification: `PointerEvent("pointerdown")` + `MouseEvent("mousedown")` ... sequence at center dismisses a live `composer-run-button` on Cursor 3.3.30 (`Recent staff meeting transcript — NV-Co-SA-MY` window). MouseEvent-only does not.
+- Reload after edits: `uv run yes2all service uninstall && uv run yes2all service install --port 9222 --port 9333 --interval <N> --countdown <C> --max-defer <M> [--no-sweep-tabs]` (read existing args from `/usr/libexec/PlistBuddy -c "Print :ProgramArguments" ~/Library/LaunchAgents/com.yes2all.watcher.plist`).

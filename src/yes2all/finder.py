@@ -220,9 +220,27 @@ FIND_APPROVAL_BUTTONS_JS = r"""
 """
 
 
+# Cursor 3.3.x's `composer-run-button` (and the new `ui-shell-tool-call__run-btn`)
+# uses React-style PointerEvent listeners on top of mousedown — `el.click()` and
+# even a bare MouseEvent triplet are silently ignored. We dispatch the full
+# pointerdown/up + mousedown/up + click sequence at the element's center; this
+# was verified live on Cursor 3.3.30 to actually dismiss the approval prompt.
+_REAL_CLICK_SNIPPET = (
+    "{ const __r = target.getBoundingClientRect();"
+    "  const __x = __r.x + __r.width/2, __y = __r.y + __r.height/2;"
+    "  const __b = {bubbles:true, cancelable:true, composed:true, view:window,"
+    "               button:0, buttons:1, clientX:__x, clientY:__y, screenX:__x, screenY:__y};"
+    "  const __p = Object.assign({pointerType:'mouse', pointerId:1, isPrimary:true}, __b);"
+    "  try { target.dispatchEvent(new PointerEvent('pointerdown', __p)); } catch(_) {}"
+    "  target.dispatchEvent(new MouseEvent('mousedown', __b));"
+    "  try { target.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, __p, {buttons:0}))); } catch(_) {}"
+    "  target.dispatchEvent(new MouseEvent('mouseup', __b));"
+    "  target.dispatchEvent(new MouseEvent('click', __b));"
+    "  break; }"
+)
 CLICK_FIRST_APPROVAL_JS = FIND_APPROVAL_BUTTONS_JS.replace(
     "results.push(describe(target));",
-    "results.push(describe(target)); target.click(); break;",
+    "results.push(describe(target)); " + _REAL_CLICK_SNIPPET,
 ).replace(
     "const __DEFER_IF_TYPING = false;",
     "const __DEFER_IF_TYPING = true;",
@@ -1218,16 +1236,23 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   }
   function textOf(el) { return ((el.innerText || el.textContent) || "").trim(); }
 
-  // VS Code editor tabs activate on mousedown (not click). Use real events
-  // bubbling from the tab's center so the workbench's drag handlers see them.
-  function activateTab(el) {
+  // Cursor 3.3.x's composer-run-button (and VS Code editor tabs) ignore plain
+  // `.click()`. They also ignore a bare MouseEvent triplet — Cursor's React
+  // root listens for PointerEvent first. Dispatch the full pointer+mouse+click
+  // sequence at the element's center.
+  function realClick(el) {
     const r = el.getBoundingClientRect();
     const x = r.x + r.width / 2, y = r.y + r.height / 2;
-    const opts = { bubbles: true, cancelable: true, view: window, button: 0, clientX: x, clientY: y };
-    el.dispatchEvent(new MouseEvent("mousedown", opts));
-    el.dispatchEvent(new MouseEvent("mouseup", opts));
-    el.dispatchEvent(new MouseEvent("click", opts));
+    const m = { bubbles: true, cancelable: true, composed: true, view: window,
+                button: 0, buttons: 1, clientX: x, clientY: y, screenX: x, screenY: y };
+    const p = Object.assign({ pointerType: "mouse", pointerId: 1, isPrimary: true }, m);
+    try { el.dispatchEvent(new PointerEvent("pointerdown", p)); } catch (_) {}
+    el.dispatchEvent(new MouseEvent("mousedown", m));
+    try { el.dispatchEvent(new PointerEvent("pointerup", Object.assign({}, p, { buttons: 0 }))); } catch (_) {}
+    el.dispatchEvent(new MouseEvent("mouseup", m));
+    el.dispatchEvent(new MouseEvent("click", m));
   }
+  const activateTab = realClick;
   function toolHint(el) {
     let cur = el;
     for (let i = 0; i < 12 && cur; i++) {
@@ -1282,7 +1307,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   let btn = findApproval();
   if (btn) {
     const d = describe(btn);
-    btn.click();
+    realClick(btn);
     setTimeout(__y2aRestoreFocus, 0);
     setTimeout(__y2aRestoreFocus, 80);
     results.push({ tab: "<active>", clicked: d });
@@ -1324,7 +1349,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
     btn = findApproval();
     if (btn) {
       const d = describe(btn);
-      btn.click();
+      realClick(btn);
       results.push({ tab: label, mounted, clicked: d });
     } else {
       results.push({ tab: label, mounted, clicked: null });
