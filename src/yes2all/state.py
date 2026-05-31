@@ -66,6 +66,7 @@ _CONFIG_DEFAULTS: dict[str, object] = {
     "interval": 1,
     "sweep_tabs": False,
     "countdown": 3,
+    "ignore_user_questions": True,
     "apps": [
         {"name": "Cursor", "app": "Cursor", "port": 9222},
         {"name": "VS Code", "app": "Visual Studio Code", "port": 9333},
