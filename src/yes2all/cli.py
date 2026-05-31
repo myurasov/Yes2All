@@ -27,6 +27,7 @@ from .finder import (
     countdown_codex_js,
     countdown_js,
     detect_chat_text_confirm_js,
+    with_ignore_user_questions,
     with_max_defer,
 )
 
@@ -142,17 +143,42 @@ def watch(
             "(0=disable deferring; click immediately even while typing).",
         ),
     ] = 0,
+    ignore_user_questions: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-user-questions/--no-ignore-user-questions",
+            help="Skip auto-answering questions the agent asks the user (e.g. Claude's "
+            "AskUserQuestion picker / multiple-choice carousels with no Yes/Allow option). "
+            "Tool-approval prompts are still auto-approved.",
+        ),
+    ] = True,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
     use_countdown = countdown > 0
+    iuq = ignore_user_questions
+
+    def _prep(js: str) -> str:
+        """Apply the max-defer and ignore-user-questions substitutions."""
+        return with_ignore_user_questions(with_max_defer(js, max_defer), iuq)
+
     js = with_max_defer(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, max_defer)
-    js_cd = with_max_defer(countdown_js(countdown), max_defer) if use_countdown else ""
+    js_cd = _prep(countdown_js(countdown)) if use_countdown else ""
     js_cd_codex = countdown_codex_js(countdown) if use_countdown else ""
-    js_cd_claude = countdown_claude_js(countdown) if use_countdown else ""
+    js_cd_claude = with_ignore_user_questions(countdown_claude_js(countdown), iuq) if use_countdown else ""
     js_text_confirm = detect_chat_text_confirm_js(countdown)
-    js_chat_question = with_max_defer(CLICK_CHAT_QUESTION_JS, max_defer)
+    js_chat_question = _prep(CLICK_CHAT_QUESTION_JS)
     js_chat_confirmation = with_max_defer(CLICK_CHAT_CONFIRMATION_JS, max_defer)
+    js_claude = with_ignore_user_questions(CLICK_CLAUDE_PROMPT_JS, iuq)
     ports = list(port) if port else [9222]
+
+    def _log_skipped(p_label: str, data: dict, agent: str) -> None:
+        """Report user-facing questions left untouched (once each, JS dedupes)."""
+        for q in data.get("skipped") or []:
+            ts = time.strftime("%H:%M:%S")
+            print(
+                f"[{ts}] SKIPPED user-question ({agent}) on '{p_label[:50]}' question={q!r}",
+                flush=True,
+            )
 
     def _summarize_click(p_title: str, data: dict) -> int:
         ts = time.strftime("%H:%M:%S")
@@ -183,7 +209,8 @@ def watch(
     async def _run() -> None:
         print(
             f"watching ports {ports} every {interval}s "
-            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, max_defer={max_defer}s) ...",
+            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, max_defer={max_defer}s, "
+            f"ignore_user_questions={iuq}) ...",
             flush=True,
         )
         while True:
@@ -206,6 +233,7 @@ def watch(
                             data_cd = json.loads(raw_cd) if isinstance(raw_cd, str) else raw_cd
                         except Exception:
                             data_cd = {}
+                        _log_skipped(f"{prt}/{p.title}", data_cd, "carousel")
                         cd_n = int(data_cd.get("count", 0) or 0)
                         cd_pending = int(data_cd.get("pending", 0) or 0)
                         if cd_n:
@@ -250,6 +278,7 @@ def watch(
                             data_cc = {}
                         p_label = f"{prt}/{p.title}"
                         clicked = _summarize_click(p_label, data)
+                        _log_skipped(p_label, data_cq, "carousel")
                         cq_n = int(data_cq.get("count", 0) or 0)
                         if cq_n:
                             ts = time.strftime("%H:%M:%S")
@@ -307,7 +336,7 @@ def watch(
                         if once:
                             return
                     # Run Claude handler.
-                    claude_js = js_cd_claude if use_countdown else CLICK_CLAUDE_PROMPT_JS
+                    claude_js = js_cd_claude if use_countdown else js_claude
                     try:
                         async with CDPSession(t.ws_url) as s:
                             raw_cl = await s.evaluate(claude_js)
@@ -317,6 +346,7 @@ def watch(
                         data_cl = json.loads(raw_cl) if isinstance(raw_cl, str) else raw_cl
                     except Exception:
                         data_cl = {}
+                    _log_skipped(f"{prt}/{t.title}", data_cl, "claude")
                     cl_n = int(data_cl.get("count", 0) or 0)
                     if cl_n:
                         ts = time.strftime("%H:%M:%S")
@@ -360,6 +390,13 @@ def service_install(
             help="Max seconds to defer auto-click while user is typing (0=disable deferring).",
         ),
     ] = 0,
+    ignore_user_questions: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-user-questions/--no-ignore-user-questions",
+            help="Skip auto-answering questions the agent asks the user (tool approvals still auto-approved).",
+        ),
+    ] = True,
 ) -> None:
     """Install + start Yes2All as a background service (launchd / systemd --user)."""
     svc.install(
@@ -368,6 +405,7 @@ def service_install(
         sweep_tabs=sweep_tabs,
         countdown=countdown,
         max_defer=max_defer,
+        ignore_user_questions=ignore_user_questions,
     )
 
 

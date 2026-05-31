@@ -40,7 +40,8 @@ def read_installed_args() -> dict | None:
     """Parse the installed launchd plist.
 
     Returns dict with keys ``ports``, ``interval``, ``sweep_tabs``, ``countdown``,
-    ``max_defer`` (or ``None`` if no plist is installed / can't be parsed).
+    ``max_defer``, ``ignore_user_questions`` (or ``None`` if no plist is
+    installed / can't be parsed).
     """
     p = launchd_plist_path()
     if not p.exists():
@@ -56,6 +57,7 @@ def read_installed_args() -> dict | None:
         sweep_tabs = True
         countdown = 0.0
         max_defer = 0.0
+        ignore_user_questions = True
         i = 0
         while i < len(args):
             a = args[i]
@@ -91,6 +93,10 @@ def read_installed_args() -> dict | None:
                 sweep_tabs = True
             elif a == "--no-sweep-tabs":
                 sweep_tabs = False
+            elif a == "--ignore-user-questions":
+                ignore_user_questions = True
+            elif a == "--no-ignore-user-questions":
+                ignore_user_questions = False
             i += 1
         if not ports:
             ports = [9222]
@@ -100,6 +106,7 @@ def read_installed_args() -> dict | None:
             "sweep_tabs": sweep_tabs,
             "countdown": countdown,
             "max_defer": max_defer,
+            "ignore_user_questions": ignore_user_questions,
         }
     except Exception:
         return None
@@ -112,15 +119,18 @@ def launchd_plist(
     sweep_tabs: bool = True,
     countdown: float = 0,
     max_defer: float = 0,
+    ignore_user_questions: bool = True,
 ) -> str:
     exe = _yes2all_executable()
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout = log_dir / "yes2all.out.log"
     stderr = log_dir / "yes2all.err.log"
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
+    iuq_flag = "--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions"
     port_args = "\n    ".join(f"<string>--port</string>   <string>{p}</string>" for p in ports)
     countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>"
     max_defer_args = f"\n    <string>--max-defer</string><string>{max_defer}</string>"
+    iuq_args = f"\n    <string>{iuq_flag}</string>"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -132,7 +142,7 @@ def launchd_plist(
     <string>watch</string>
     {port_args}
     <string>--interval</string><string>{interval}</string>
-    <string>{sweep_flag}</string>{countdown_args}{max_defer_args}
+    <string>{sweep_flag}</string>{countdown_args}{max_defer_args}{iuq_args}
   </array>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
@@ -150,12 +160,21 @@ def launchd_install(
     sweep_tabs: bool = True,
     countdown: float = 0,
     max_defer: float = 0,
+    ignore_user_questions: bool = True,
 ) -> None:
     plist_path = launchd_plist_path()
     log_dir = Path.home() / "Library" / "Logs" / "yes2all"
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(
-        launchd_plist(ports, interval, log_dir, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
+        launchd_plist(
+            ports,
+            interval,
+            log_dir,
+            sweep_tabs=sweep_tabs,
+            countdown=countdown,
+            max_defer=max_defer,
+            ignore_user_questions=ignore_user_questions,
+        )
     )
     print(f"wrote {plist_path}")
     # Reload if already loaded, then load.
@@ -346,9 +365,11 @@ def systemd_unit(
     sweep_tabs: bool = True,
     countdown: float = 0,
     max_defer: float = 0,
+    ignore_user_questions: bool = True,
 ) -> str:
     exe = _yes2all_executable()
     sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
+    iuq_flag = "--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions"
     port_args = " ".join(f"--port {p}" for p in ports)
     countdown_arg = f" --countdown {countdown}"
     max_defer_arg = f" --max-defer {max_defer}"
@@ -357,7 +378,7 @@ Description=Yes2All — auto-approve agent tool prompts in Cursor / VS Code
 After=graphical-session.target
 
 [Service]
-ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}{max_defer_arg}
+ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}{max_defer_arg} {iuq_flag}
 Restart=always
 RestartSec=2
 
@@ -372,10 +393,20 @@ def systemd_install(
     sweep_tabs: bool = True,
     countdown: float = 0,
     max_defer: float = 0,
+    ignore_user_questions: bool = True,
 ) -> None:
     unit_path = systemd_unit_path()
     unit_path.parent.mkdir(parents=True, exist_ok=True)
-    unit_path.write_text(systemd_unit(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer))
+    unit_path.write_text(
+        systemd_unit(
+            ports,
+            interval,
+            sweep_tabs=sweep_tabs,
+            countdown=countdown,
+            max_defer=max_defer,
+            ignore_user_questions=ignore_user_questions,
+        )
+    )
     print(f"wrote {unit_path}")
     for cmd in (
         ["systemctl", "--user", "daemon-reload"],
@@ -419,12 +450,27 @@ def install(
     sweep_tabs: bool = True,
     countdown: float = 0,
     max_defer: float = 0,
+    ignore_user_questions: bool = True,
 ) -> None:
     sysname = platform.system()
     if sysname == "Darwin":
-        launchd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
+        launchd_install(
+            ports,
+            interval,
+            sweep_tabs=sweep_tabs,
+            countdown=countdown,
+            max_defer=max_defer,
+            ignore_user_questions=ignore_user_questions,
+        )
     elif sysname == "Linux":
-        systemd_install(ports, interval, sweep_tabs=sweep_tabs, countdown=countdown, max_defer=max_defer)
+        systemd_install(
+            ports,
+            interval,
+            sweep_tabs=sweep_tabs,
+            countdown=countdown,
+            max_defer=max_defer,
+            ignore_user_questions=ignore_user_questions,
+        )
     else:
         raise RuntimeError(
             f"Unsupported platform for service install: {sysname}. On Windows, use Task Scheduler manually for now."

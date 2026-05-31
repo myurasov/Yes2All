@@ -400,9 +400,15 @@ COUNTDOWN_BADGE_JS = r"""
     return badge;
   }
 
+  // See CLICK_CLAUDE_PROMPT_JS for the IGNORE_USER_QUESTIONS rationale. Only
+  // affects the carousel section below; Cursor run-buttons and Allow/Skip
+  // confirmation widgets are always tool-approvals.
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+
   const now = Date.now();
   const pending = [];
   const clicked = [];
+  const skipped = [];
 
   // --- 1) Cursor-style approval buttons (Run, Allow, etc.) ---
   const seen = new Set();
@@ -451,14 +457,22 @@ COUNTDOWN_BADGE_JS = r"""
       if (NEGATIVE.test(lbl)) continue;
       if (POSITIVE.test(lbl)) { chosen = it; break; }
     }
-    if (!chosen) {
+    if (!chosen && !IGNORE_USER_QUESTIONS) {
       for (const it of items) {
         const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
         if (NEGATIVE.test(lbl)) continue;
         chosen = it; break;
       }
     }
-    if (!chosen) continue;
+    if (!chosen) {
+      // Open-ended carousel with no affirmative option: leave for the user.
+      if (IGNORE_USER_QUESTIONS && !c.hasAttribute("data-y2a-skipped")) {
+        c.setAttribute("data-y2a-skipped", "1");
+        const q = (((c.innerText || c.textContent) || "").split(/\r?\n/).find(s => s.trim().length) || "").trim().slice(0, 120);
+        skipped.push(q);
+      }
+      continue;
+    }
     // Find submit button.
     const submitBtn =
       c.querySelector(".chat-question-submit") ||
@@ -543,7 +557,7 @@ COUNTDOWN_BADGE_JS = r"""
     if (p && !p.getAttribute(BADGE_ATTR)) b.remove();
   }
 
-  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending});
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped});
 })()
 """
 
@@ -665,6 +679,18 @@ CLICK_CLAUDE_PROMPT_JS = r"""
   }
   function firstLine(t) { return (t.split(/\r?\n/)[0] || "").trim(); }
 
+  // When true, prompts that have no affirmative option (Yes/Allow/Approve/...)
+  // are treated as user-facing questions (e.g. the AskUserQuestion tool's
+  // multiple-choice "Which language?" picker) and left untouched for the user
+  // to answer. Tool-approval prompts always carry an affirmative option, so
+  // this never suppresses a real approval. See with_ignore_user_questions().
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+  function questionText(c) {
+    const lines = (c.innerText || c.textContent || "").split(/\r?\n/)
+      .map(s => s.trim()).filter(Boolean);
+    return ((lines.find(s => s.endsWith("?")) || lines[0]) || "").slice(0, 120);
+  }
+
   let doc = document;
   const inner = document.querySelector('#active-frame');
   if (inner) { try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {} }
@@ -672,9 +698,10 @@ CLICK_CLAUDE_PROMPT_JS = r"""
   const containers = Array.from(doc.querySelectorAll('[class*="permissionRequestContainer"]'))
     .filter(c => !c.className.includes("Background"));
   if (containers.length === 0)
-    return JSON.stringify({url: location.href, count: 0, results: []});
+    return JSON.stringify({url: location.href, count: 0, results: [], skipped: []});
 
   const results = [];
+  const skipped = [];
   for (const c of containers) {
     // Variant 2: radio options + submit button.
     const radios = Array.from(c.querySelectorAll('[role="radio"]'));
@@ -685,8 +712,10 @@ CLICK_CLAUDE_PROMPT_JS = r"""
         if (NEGATIVE.test(label)) continue;
         if (POSITIVE.test(label)) { chosenRadio = r; break; }
       }
-      if (!chosenRadio) {
-        // Fallback: first non-negative radio.
+      if (!chosenRadio && !IGNORE_USER_QUESTIONS) {
+        // Fallback: first non-negative radio. Disabled when ignoring user
+        // questions — no affirmative option means this is a question the agent
+        // wants the user to answer, not a tool-approval.
         for (const r of radios) {
           const label = firstLine(btnText(r));
           if (NEGATIVE.test(label)) continue;
@@ -702,6 +731,13 @@ CLICK_CLAUDE_PROMPT_JS = r"""
         results.push({label, question: label});
         continue;
       }
+      // No affirmative radio. Leave the question for the user; report it once
+      // (radio prompts otherwise fall through and click "Submit answers").
+      if (IGNORE_USER_QUESTIONS && !c.hasAttribute("data-y2a-skipped")) {
+        c.setAttribute("data-y2a-skipped", "1");
+        skipped.push(questionText(c));
+      }
+      continue;
     }
 
     // Variant 1: direct numbered buttons.
@@ -718,7 +754,7 @@ CLICK_CLAUDE_PROMPT_JS = r"""
     realClick(chosen);
     results.push({label, question: btnText(chosen)});
   }
-  return JSON.stringify({url: location.href, count: results.length, results});
+  return JSON.stringify({url: location.href, count: results.length, results, skipped});
 })()
 """
 
@@ -752,17 +788,25 @@ COUNTDOWN_CLAUDE_BADGE_JS = r"""
     return (clone.innerText || clone.textContent || "").trim();
   }
   function firstLine(t) { return (t.split(/\r?\n/)[0] || "").trim(); }
+  // See CLICK_CLAUDE_PROMPT_JS for the IGNORE_USER_QUESTIONS rationale.
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+  function questionText(c) {
+    const lines = (c.innerText || c.textContent || "").split(/\r?\n/)
+      .map(s => s.trim()).filter(Boolean);
+    return ((lines.find(s => s.endsWith("?")) || lines[0]) || "").slice(0, 120);
+  }
 
   const containers = Array.from(doc.querySelectorAll('[class*="permissionRequestContainer"]'))
     .filter(c => !c.className.includes("Background"));
   if (containers.length === 0) {
     for (const b of doc.querySelectorAll("." + BADGE_CLS)) b.remove();
-    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
+    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: [], skipped: []});
   }
 
   const now = Date.now();
   const pending = [];
   const clicked = [];
+  const skipped = [];
 
   for (const c of containers) {
     // Variant 2: radio options + submit button.
@@ -775,14 +819,22 @@ COUNTDOWN_CLAUDE_BADGE_JS = r"""
         if (NEGATIVE.test(label)) continue;
         if (POSITIVE.test(label)) { chosenRadio = r; break; }
       }
-      if (!chosenRadio) {
+      if (!chosenRadio && !IGNORE_USER_QUESTIONS) {
         for (const r of radios) {
           const label = firstLine(btnText(r));
           if (NEGATIVE.test(label)) continue;
           chosenRadio = r; break;
         }
       }
-      if (chosenRadio) {
+      if (!chosenRadio) {
+        // User-facing question (no affirmative option): leave it for the user.
+        if (IGNORE_USER_QUESTIONS && !c.hasAttribute("data-y2a-skipped")) {
+          c.setAttribute("data-y2a-skipped", "1");
+          skipped.push(questionText(c));
+        }
+        continue;
+      }
+      {
         // Select the radio visually.
         if (chosenRadio.getAttribute("aria-checked") !== "true") realClick(chosenRadio);
         // Badge goes on the submit button.
@@ -850,7 +902,7 @@ COUNTDOWN_CLAUDE_BADGE_JS = r"""
     }
   }
 
-  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending});
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped});
 })()
 """
 
@@ -951,38 +1003,50 @@ CLICK_CHAT_QUESTION_JS = r"""
     setTimeout(__y2aRestoreFocus, 80);
   }
 
+  // See CLICK_CLAUDE_PROMPT_JS: when ignoring user questions, only auto-submit
+  // a carousel that has an explicitly affirmative option. Open-ended carousels
+  // (the agent asking the user to choose between content options) are left be.
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+
   const results = [];
+  const skipped = [];
   const containers = document.querySelectorAll(".chat-question-carousel-container");
   for (const c of containers) {
     if (!visible(c)) continue;
     const items = Array.from(c.querySelectorAll('.chat-question-list-item[role="option"]'));
     if (items.length === 0) continue;
 
+    // First non-empty line of the carousel container is usually the question
+    // (e.g. "Run command in terminal?").
+    const containerText = ((c.innerText || c.textContent) || "").trim();
+    const question = (containerText.split(/\r?\n/).find(s => s.trim().length) || "").trim().slice(0, 120);
+
     // Pick the first non-negative option. Prefer one matching a positive
-    // verb; otherwise fall back to the first item that isn't an explicit
-    // negative (so generic carousels like "Single confirmation, then run
-    // all 1000" / "Per-run confirmation dialog" still auto-submit option #1).
+    // verb; otherwise (only when NOT ignoring user questions) fall back to the
+    // first item that isn't an explicit negative (so generic carousels like
+    // "Single confirmation, then run all 1000" still auto-submit option #1).
     let chosen = null;
     for (const it of items) {
       const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
       if (NEGATIVE.test(lbl)) continue;
       if (POSITIVE.test(lbl)) { chosen = it; break; }
     }
-    if (!chosen) {
+    if (!chosen && !IGNORE_USER_QUESTIONS) {
       for (const it of items) {
         const lbl = (it.querySelector(".chat-question-list-label")?.innerText || it.innerText || "").trim();
         if (NEGATIVE.test(lbl)) continue;
         chosen = it; break;
       }
     }
-    if (!chosen) continue;
+    if (!chosen) {
+      if (IGNORE_USER_QUESTIONS && !c.hasAttribute("data-y2a-skipped")) {
+        c.setAttribute("data-y2a-skipped", "1");
+        skipped.push(question);
+      }
+      continue;
+    }
 
     const label = (chosen.querySelector(".chat-question-list-label")?.innerText || "").trim().slice(0, 80);
-
-    // First non-empty line of the carousel container is usually the question
-    // (e.g. "Run command in terminal?").
-    const containerText = ((c.innerText || c.textContent) || "").trim();
-    const question = (containerText.split(/\r?\n/).find(s => s.trim().length) || "").trim().slice(0, 120);
 
     // 1) Select the option (real mousedown/mouseup/click).
     if (!chosen.classList.contains("selected")) realClick(chosen);
@@ -1006,7 +1070,7 @@ CLICK_CHAT_QUESTION_JS = r"""
 
     results.push({label, how, question});
   }
-  return JSON.stringify({url: location.href, count: results.length, results});
+  return JSON.stringify({url: location.href, count: results.length, results, skipped});
 })()
 """
 
@@ -1590,3 +1654,16 @@ def with_max_defer(js: str, max_defer_seconds: float) -> str:
     """
     ms = int(max(0.0, float(max_defer_seconds)) * 1000)
     return js.replace("__MAX_DEFER_MS__", str(ms))
+
+
+def with_ignore_user_questions(js: str, ignore: bool) -> str:
+    """Substitute __Y2A_IGNORE_USER_QUESTIONS__ in *js* with a JS boolean.
+
+    When ``True`` (the default), multiple-choice prompts that have no
+    affirmative option (Yes/Allow/Approve/...) — i.e. questions the agent wants
+    the user to answer, like Claude Code's AskUserQuestion picker — are left
+    untouched instead of being auto-answered with an arbitrary first choice.
+    Tool-approval prompts always carry an affirmative option, so they are
+    unaffected. Handlers without this placeholder are returned unchanged.
+    """
+    return js.replace("__Y2A_IGNORE_USER_QUESTIONS__", "true" if ignore else "false")

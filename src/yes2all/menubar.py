@@ -152,10 +152,13 @@ class Yes2AllApp(rumps.App):
         self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
         self.countdown: float = cfg.get("countdown", 0)
         self.max_defer: float = cfg.get("max_defer", 0)
+        self.ignore_user_questions: bool = cfg.get("ignore_user_questions", True)
 
         self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
         self.sweep_item = rumps.MenuItem("Cycle Cursor Tabs", callback=self.on_toggle_sweep)
         self.sweep_item.state = 1 if self.sweep_tabs else 0
+        self.iuq_item = rumps.MenuItem("Ignore User Questions", callback=self.on_toggle_iuq)
+        self.iuq_item.state = 1 if self.ignore_user_questions else 0
 
         # Flash state: when the watcher reports a click, briefly swap the
         # menubar icon to a green check.
@@ -213,6 +216,7 @@ class Yes2AllApp(rumps.App):
         settings_menu.add(self.countdown_item)
         settings_menu.add(self.sweep_item)
         settings_menu.add(self.max_defer_item)
+        settings_menu.add(self.iuq_item)
 
         self.menu = [
             self.toggle_item,
@@ -266,7 +270,9 @@ class Yes2AllApp(rumps.App):
             self.sweep_tabs = cfg["sweep_tabs"]
             self.countdown = cfg.get("countdown", 0)
             self.max_defer = cfg.get("max_defer", self.max_defer)
+            self.ignore_user_questions = cfg.get("ignore_user_questions", self.ignore_user_questions)
             self.sweep_item.state = 1 if self.sweep_tabs else 0
+            self.iuq_item.state = 1 if self.ignore_user_questions else 0
             self.interval_item.title = self._interval_title()
             self.countdown_item.title = self._countdown_title()
             self.max_defer_item.title = self._max_defer_title()
@@ -317,6 +323,7 @@ class Yes2AllApp(rumps.App):
                         sweep_tabs=self.sweep_tabs,
                         countdown=self.countdown,
                         max_defer=self.max_defer,
+                        ignore_user_questions=self.ignore_user_questions,
                     )
                 except Exception as e:  # noqa: BLE001
                     rumps.notification("Yes2All", "Reinstall failed", str(e))
@@ -359,6 +366,7 @@ class Yes2AllApp(rumps.App):
                 sweep_tabs=self.sweep_tabs,
                 countdown=self.countdown,
                 max_defer=self.max_defer,
+                ignore_user_questions=self.ignore_user_questions,
             )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Start failed", str(e))
@@ -402,10 +410,18 @@ class Yes2AllApp(rumps.App):
                     sweep_tabs=self.sweep_tabs,
                     countdown=self.countdown,
                     max_defer=self.max_defer,
+                    ignore_user_questions=self.ignore_user_questions,
                 )
             except Exception as e:  # noqa: BLE001
                 rumps.notification("Yes2All", "Reinstall failed", str(e))
                 return
+            self._refresh_status()
+
+    def on_toggle_iuq(self, item: rumps.MenuItem) -> None:
+        self.ignore_user_questions = not self.ignore_user_questions
+        item.state = 1 if self.ignore_user_questions else 0
+        self._save_config()
+        if self._reinstall_if_loaded():
             self._refresh_status()
 
     def on_open_log(self, _: object) -> None:
@@ -439,6 +455,7 @@ class Yes2AllApp(rumps.App):
                 "sweep_tabs": self.sweep_tabs,
                 "countdown": self.countdown,
                 "max_defer": self.max_defer,
+                "ignore_user_questions": self.ignore_user_questions,
                 "apps": self.apps,
             }
         )
@@ -555,6 +572,7 @@ class Yes2AllApp(rumps.App):
                 sweep_tabs=self.sweep_tabs,
                 countdown=self.countdown,
                 max_defer=self.max_defer,
+                ignore_user_questions=self.ignore_user_questions,
             )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Reinstall failed", str(e))
@@ -708,7 +726,8 @@ class Yes2AllApp(rumps.App):
             f"Interval: {self.interval}s\n"
             f"Countdown: {self.countdown:.0f}s\n"
             f"Max typing defer: {self.max_defer:.0f}s\n"
-            f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n\n"
+            f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n"
+            f"Ignore user questions: {'on' if self.ignore_user_questions else 'off'}\n\n"
             f"© Mikhail Yurasov <me@yurasov.me>\n"
             f"Apache License 2.0"
         )

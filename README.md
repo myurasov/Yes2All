@@ -38,6 +38,7 @@ uv sync && install-win.bat
 ## Features
 
 - Watches one or more CDP ports at once, so Cursor and VS Code can be monitored by one process.
+- Approves tool-call prompts but skips questions the agent asks *you* (on by default, `--ignore-user-questions`) — e.g. Claude Code's AskUserQuestion picker or a multiple-choice carousel with no Yes/Allow option. Disable with `--no-ignore-user-questions`.
 - Shows a countdown badge before approving prompts by default (`--countdown 3`), or clicks instantly with `--countdown 0`.
 - Dispatches real mouse events for button-style prompts and uses CDP input events for text confirmations.
 - Optionally cycles inactive Cursor chat tabs in instant mode (`--sweep-tabs --countdown 0`), then restores the originally active tab.
@@ -87,26 +88,29 @@ uv run yes2all service install --port 9222 --port 9333 --interval 1 --no-sweep-t
 | VS Code Copilot Chat | Plain-text confirmation question | Types `Yes` and presses Enter when a matching yes/no question is waiting for input |
 | VS Code Codex | Webview iframe prompt | Selects the `Yes` radio option and submits |
 | VS Code Claude Code | Webview iframe prompt | Handles direct numbered affirmative buttons and radio + submit variants |
+| Cursor / Claude / Codex | User-facing question (no Yes/Allow option) | Left untouched for you to answer while `--ignore-user-questions` is on (the default); logged as `SKIPPED user-question` |
 
 By default Yes2All only checks the active Cursor chat tab. Use `--sweep-tabs --countdown 0` when you want it to briefly cycle inactive Cursor chat tabs looking for pending approvals.
+
+Yes2All tells a tool-approval apart from a user question by whether the prompt offers an affirmative option (`Yes`, `Allow`, `Approve`, `Accept`, …). Approvals always do; an open-ended question (e.g. "Which language?" → Python / TypeScript / Rust) does not, so with `--ignore-user-questions` (default) it is skipped instead of being auto-answered with an arbitrary first choice. Pass `--no-ignore-user-questions` to restore the old "pick the first non-negative option" behavior.
 
 ## CLI Reference
 
 | Command | Description | Platform |
 |---|---|---|
-| `yes2all watch --port PORT [--port PORT ...] [--interval N] [--countdown N] [--sweep-tabs/--no-sweep-tabs] [--once]` | Run y2a-service in foreground | All |
+| `yes2all watch --port PORT [--port PORT ...] [--interval N] [--countdown N] [--sweep-tabs/--no-sweep-tabs] [--ignore-user-questions/--no-ignore-user-questions] [--once]` | Run y2a-service in foreground | All |
 | `yes2all targets --port PORT` | List CDP targets on a port | All |
 | `yes2all probe --port PORT [--click]` | Find (and optionally click) approval buttons | All |
-| `yes2all service install --port PORT [--port PORT ...] [--interval N] [--countdown N] [--sweep-tabs/--no-sweep-tabs]` | Install y2a-service (launchd / systemd) | macOS, Linux |
+| `yes2all service install --port PORT [--port PORT ...] [--interval N] [--countdown N] [--sweep-tabs/--no-sweep-tabs] [--ignore-user-questions/--no-ignore-user-questions]` | Install y2a-service (launchd / systemd) | macOS, Linux |
 | `yes2all service uninstall` | Remove y2a-service | macOS, Linux |
 | `yes2all service status` | Check y2a-service status | macOS, Linux |
 | `yes2all menubar` | Run y2a-menubar in foreground | macOS |
 | `yes2all service install-menubar` | Auto-start y2a-menubar at login | macOS |
 | `yes2all service uninstall-menubar` | Remove y2a-menubar auto-start | macOS |
 
-Defaults: `--port 9222`, `--interval 1`, `--countdown 3`, and active-tab-only Cursor scanning (`--no-sweep-tabs`).
+Defaults: `--port 9222`, `--interval 1`, `--countdown 3`, active-tab-only Cursor scanning (`--no-sweep-tabs`), and user questions skipped (`--ignore-user-questions`).
 
-**y2a-menubar** is a native macOS menu-bar app built with [rumps](https://github.com/jaredks/rumps). Icon: **✓** when running, **○** when stopped. It flashes green on each approval click and includes Start/Stop, watched port checkboxes, Add Port, Reset counters, interval/countdown settings, Cursor tab cycling, Launch w/CDP, Tail log in Terminal, and About.
+**y2a-menubar** is a native macOS menu-bar app built with [rumps](https://github.com/jaredks/rumps). Icon: **✓** when running, **○** when stopped. It flashes green on each approval click and includes Start/Stop, watched port checkboxes, Add Port, Reset counters, interval/countdown settings, Cursor tab cycling, an "Ignore User Questions" toggle, Launch w/CDP, Tail log in Terminal, and About.
 
 ## Logs and Config
 
