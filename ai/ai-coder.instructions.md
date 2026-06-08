@@ -285,3 +285,34 @@ Project-specific directions captured from the user. Update this file whenever th
 - `COUNTDOWN_BADGE_JS`'s internal `realClick` was already mostly-correct (mousedown/mouseup/click) but is still MouseEvent-only — not touched here because the user has `countdown=0`; revisit if the countdown path stops dismissing prompts on Cursor 3.3+.
 - Verification: `PointerEvent("pointerdown")` + `MouseEvent("mousedown")` ... sequence at center dismisses a live `composer-run-button` on Cursor 3.3.30 (`Recent staff meeting transcript — NV-Co-SA-MY` window). MouseEvent-only does not.
 - Reload after edits: `uv run yes2all service uninstall && uv run yes2all service install --port 9222 --port 9333 --interval <N> --countdown <C> --max-defer <M> [--no-sweep-tabs]` (read existing args from `/usr/libexec/PlistBuddy -c "Print :ProgramArguments" ~/Library/LaunchAgents/com.yes2all.watcher.plist`).
+
+## iCloud Drive environment constraints (discovered 2026-06-07)
+
+This project currently lives at `~/Library/Mobile Documents/com~apple~CloudDocs/Projects/Yes2All` — **inside iCloud Drive**, with **spaces** in the path. Two distinct problems result; both are environmental, not code bugs:
+
+### 1. Editable install does not put `yes2all` on `sys.path` (so `uv run yes2all` / `import yes2all` fails)
+
+- Symptom: `uv run yes2all ...` and `.venv/bin/yes2all ...` fail with `ModuleNotFoundError: No module named 'yes2all'` (or `yes2all.cli`), even right after `uv sync`. `uv sync` reports success and doesn't detect the broken state.
+- Root cause: uv's editable install writes `_editable_impl_yes2all.pth` (a **plain-path** entry pointing at `<project>/src`) into site-packages. `.pth` files are processed by `site.py` in **sorted filename order**; `_editable_impl_yes2all.pth` sorts **before** uv's `_virtualenv.pth` (`e` < `v`). In this venv, a plain-path `.pth` entry processed before `_virtualenv.pth` is **dropped** from `sys.path` during site init (an interaction with uv's virtualenv shim, aggravated by the spaces in the path). Verified empirically: identical path content in a file sorting *after* `_virtualenv.pth` resolves fine; before it does not. Also the build's `force-include` of `assets` materializes a `site-packages/yes2all/` (assets-only) dir that can shadow the package as a namespace pkg.
+- Reliable workaround: **`PYTHONPATH=<project>/src`** is added at Python startup *before* any `.pth` processing, so it is bulletproof. Measured 10/10 success with `PYTHONPATH=src` vs 0/10 relying on the `.pth`. For dev, prefix commands: `PYTHONPATH="$(pwd)/src" .venv/bin/yes2all <cmd>` (or `PYTHONPATH="$(pwd)/src" uv run --no-sync yes2all <cmd>`).
+- A supplementary `.pth` sorting after `_virtualenv.pth` was tried but is fragile (uv operations / a second site pass drop it); do not rely on it. PYTHONPATH is the answer.
+- `service.py` now embeds `PYTHONPATH=<src>` into the generated launchd plist (`EnvironmentVariables`) and systemd unit (`Environment=`) via the new `_src_dir()` helper, so background jobs import reliably regardless of editable-install state. Harmless on non-iCloud installs (just adds the package's own src dir).
+
+### 2. launchd background agents cannot run from iCloud Drive (hard blocker)
+
+- Symptom: `service install` / `install-menubar` load the plist, but the job never runs — `launchctl list` shows PID `-` and last-exit `126`; `~/Library/Logs/yes2all/*.err.log` shows `/bin/sh: .../.venv/bin/yes2all: Operation not permitted`. The binary runs fine from a Terminal (which has iCloud/TCC access) but **not** from a launchd background context.
+- Root cause: macOS TCC denies launchd-spawned background agents access to iCloud Drive (`~/Library/Mobile Documents/com~apple~CloudDocs/`). No quarantine xattr involved (only benign `com.apple.provenance`). PYTHONPATH does **not** fix this — the executable + source themselves are unreadable from the background context.
+- Therefore `service install` / `install-menubar` cannot produce a working background service while the project is in iCloud. Options: (a) move the project out of iCloud (e.g. `~/Projects/Yes2All` — also fixes problem #1); (b) install a self-contained venv *outside* iCloud and point the LaunchAgents there; (c) run foreground; (d) grant Full Disk Access to the Python binary (fragile, untested).
+- The macOS **menubar app runs fine in the foreground / GUI session** (it is not launchd-spawned, so it retains iCloud access and can load its `src/yes2all/assets` icons).
+
+### How to start foreground (user's chosen mode, 2026-06-07)
+
+```sh
+cd "<project>"
+export PYTHONPATH="$(pwd)/src"
+nohup .venv/bin/yes2all watch --port 9222 --port 9333 --interval 1 > /tmp/y2a_watch.log 2>&1 &
+nohup .venv/bin/yes2all menubar > /tmp/y2a_menubar.log 2>&1 &
+```
+
+- Verified working: watcher connects to Cursor on 9222 and auto-clicks `Continue ⏎` approval buttons; menubar process stays alive (rumps emits no startup log). These do **not** persist across logout/reboot (no LaunchAgent).
+- The editable install in `.venv` is currently importable only via `PYTHONPATH`; `uv pip install -e .` / `uv sync` will not change that on this path.

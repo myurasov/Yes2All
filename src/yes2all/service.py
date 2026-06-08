@@ -29,6 +29,23 @@ def _yes2all_executable() -> str:
     )
 
 
+def _src_dir() -> str:
+    """Directory that must be on PYTHONPATH for `yes2all` to import.
+
+    Editable installs can fail to register the package on ``sys.path`` via the
+    generated ``.pth`` file in some environments — notably an iCloud-synced
+    project path containing spaces, where uv's ``_editable_impl_yes2all.pth``
+    (a plain-path entry sorted before ``_virtualenv.pth``) is dropped during
+    site initialization. Embedding ``PYTHONPATH`` in the launchd/systemd
+    definition makes the background job import reliably regardless of the
+    editable-install state. The value is the directory that contains the
+    running ``yes2all`` package (i.e. ``<project>/src``).
+    """
+    import yes2all
+
+    return str(Path(yes2all.__file__).resolve().parent.parent)
+
+
 # ----- macOS launchd -----------------------------------------------------------
 
 
@@ -131,6 +148,7 @@ def launchd_plist(
     countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>"
     max_defer_args = f"\n    <string>--max-defer</string><string>{max_defer}</string>"
     iuq_args = f"\n    <string>{iuq_flag}</string>"
+    src_dir = _src_dir()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -144,6 +162,10 @@ def launchd_plist(
     <string>--interval</string><string>{interval}</string>
     <string>{sweep_flag}</string>{countdown_args}{max_defer_args}{iuq_args}
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>     <string>{src_dir}</string>
+  </dict>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
   <key>StandardOutPath</key>  <string>{stdout}</string>
@@ -290,6 +312,7 @@ def _menubar_plist(log_dir: Path) -> str:
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout = log_dir / "menubar.out.log"
     stderr = log_dir / "menubar.err.log"
+    src_dir = _src_dir()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -300,6 +323,10 @@ def _menubar_plist(log_dir: Path) -> str:
     <string>{exe}</string>
     <string>menubar</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>     <string>{src_dir}</string>
+  </dict>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
@@ -373,11 +400,13 @@ def systemd_unit(
     port_args = " ".join(f"--port {p}" for p in ports)
     countdown_arg = f" --countdown {countdown}"
     max_defer_arg = f" --max-defer {max_defer}"
+    src_dir = _src_dir()
     return f"""[Unit]
 Description=Yes2All — auto-approve agent tool prompts in Cursor / VS Code
 After=graphical-session.target
 
 [Service]
+Environment=PYTHONPATH={src_dir}
 ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}{max_defer_arg} {iuq_flag}
 Restart=always
 RestartSec=2
