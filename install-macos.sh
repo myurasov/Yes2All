@@ -5,6 +5,14 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
+# -- prerequisites ---------------------------------------------------------
+if ! command -v uv >/dev/null 2>&1; then
+  echo "Error: 'uv' is not installed or not on PATH." >&2
+  echo "Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  echo "(then restart your shell, or: source \$HOME/.local/bin/env)" >&2
+  exit 1
+fi
+
 # -- colors ---------------------------------------------------------------
 BOLD='\033[1m'
 DIM='\033[2m'
@@ -162,7 +170,7 @@ while true; do
     5)
       prompt_watcher_params
       echo -e "\n  ${CYAN}Running y2a-service (Ctrl+C to stop)...${RESET}\n"
-      uv run yes2all watch $PORT_ARGS --interval "$INTERVAL" --countdown "$COUNTDOWN" || true
+      uv run yes2all watch $PORT_ARGS --interval "$INTERVAL" $SWEEP_FLAG --countdown "$COUNTDOWN" || true
       pause
       ;;
     6)
