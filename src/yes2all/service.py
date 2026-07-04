@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -12,6 +13,24 @@ import sys
 from pathlib import Path
 
 LABEL = "com.yes2all.watcher"
+
+
+def _launchd_kickstart(label: str) -> None:
+    """Force-start a just-loaded LaunchAgent.
+
+    `launchctl load -w` sets RunAtLoad but does not reliably *start* an
+    Aqua-limited job when triggered programmatically (e.g. from the menubar's
+    reinstall-on-settings-change path or from a non-GUI shell). Without this the
+    job loads but stays `not running` until a manual kickstart. `-k` also
+    restarts it if it happens to already be running, so a reinstall always ends
+    with a fresh process on the new args.
+    """
+    subprocess.run(
+        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
 
 
 def _yes2all_executable() -> str:
@@ -214,6 +233,7 @@ def launchd_install(
     )
     if r.returncode != 0:
         raise RuntimeError(f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}")
+    _launchd_kickstart(LABEL)
     print(f"loaded launchd job {LABEL}")
     print(f"logs: {log_dir}")
 
@@ -359,6 +379,7 @@ def menubar_install() -> None:
     )
     if r.returncode != 0:
         raise RuntimeError(f"launchctl load failed: {r.stderr.strip() or r.stdout.strip()}")
+    _launchd_kickstart(MENUBAR_LABEL)
     print(f"loaded launchd job {MENUBAR_LABEL}")
 
 
