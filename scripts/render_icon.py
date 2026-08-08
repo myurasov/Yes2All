@@ -100,10 +100,10 @@ def main() -> None:
     render_check(22, OUT / "icon-flash.png", GREEN, pad=MENU_PAD)
     render_check(44, OUT / "icon-flash@2x.png", GREEN, pad=MENU_PAD)
 
-    # Menubar checkmark (defer state — sky blue while typing pauses approvals).
-    SKYBLUE = (95, 190, 245, 255)
-    render_check(22, OUT / "icon-defer.png", SKYBLUE, pad=MENU_PAD)
-    render_check(44, OUT / "icon-defer@2x.png", SKYBLUE, pad=MENU_PAD)
+    # Menubar checkmark (defer state — yellow while typing pauses approvals).
+    YELLOW = (255, 200, 0, 255)
+    render_check(22, OUT / "icon-defer.png", YELLOW, pad=MENU_PAD)
+    render_check(44, OUT / "icon-defer@2x.png", YELLOW, pad=MENU_PAD)
 
     # About dialog (full-bleed checkmark).
     render_check(256, OUT / "icon-large-dark.png", BLACK)

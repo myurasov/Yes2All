@@ -234,7 +234,56 @@ def watch(
         )
         down_ports: set[int] = set()
         deferring: set[int] = set()
+        page_typing: dict[int, bool] = {}
         js_iframe_probe = with_resume_delay(IFRAME_TYPING_PROBE_JS, resume_delay)
+
+        async def _typing_monitor() -> None:
+            """Fast defer loop, decoupled from the poll interval.
+
+            Probes every webview frame for typing ~4x/s so the defer state
+            (and the menubar icon reading defer.json) reacts in ~0.25s instead
+            of waiting for the next full poll tick. Owns `deferring` and the
+            defer.json stamps; the main loop only reads `deferring`.
+            """
+            TYPING_POLL = 0.25
+            while True:
+                for prt in ports:
+                    typing = page_typing.get(prt, False)
+                    if not typing:
+                        try:
+                            targets_m = await list_targets(port=prt)
+                        except Exception:
+                            targets_m = []
+                        for tm in targets_m:
+                            if tm.type != "iframe" or not tm.ws_url:
+                                continue
+                            if "vscode-webview://" not in f"{tm.url} {tm.title}":
+                                continue
+                            try:
+                                async with CDPSession(tm.ws_url) as sm:
+                                    raw_m = await sm.evaluate(js_iframe_probe, timeout=3)
+                                data_m = json.loads(raw_m) if isinstance(raw_m, str) else raw_m
+                                if data_m.get("typing"):
+                                    typing = True
+                                    break
+                            except Exception:
+                                continue
+                    if typing and prt not in deferring:
+                        deferring.add(prt)
+                        print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
+                        _state.write_defer(sorted(deferring))
+                    elif not typing and prt in deferring:
+                        deferring.discard(prt)
+                        print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
+                        _state.write_defer(sorted(deferring))
+                if deferring:
+                    # Re-stamp so readers can treat a stale stamp as inactive.
+                    _state.write_defer(sorted(deferring))
+                await asyncio.sleep(TYPING_POLL)
+
+        _state.write_defer([])  # clear any stale stamp from a previous run
+        if resume_delay > 0:
+            asyncio.get_running_loop().create_task(_typing_monitor())
         while True:
             for prt in ports:
                 port_typing = False
@@ -347,38 +396,13 @@ def watch(
                     if t.type == "iframe" and t.ws_url and "vscode-webview://" in f"{t.url} {t.title}"
                 ]
 
-                # Cross-frame typing check. One webview surfaces as several
-                # frame targets, and the user's caret and a pending prompt can
-                # live in different frame documents — so probe ALL webview
-                # frames (plus the page-level flag) before clicking in any.
-                webview_typing = False
-                if resume_delay > 0:
-                    for t in webviews:
-                        try:
-                            async with CDPSession(t.ws_url) as s:
-                                raw_tp = await s.evaluate(js_iframe_probe)
-                            data_tp = json.loads(raw_tp) if isinstance(raw_tp, str) else raw_tp
-                            if data_tp.get("typing"):
-                                webview_typing = True
-                                break
-                        except Exception:
-                            continue
-
-                # Defer webview handlers while typing anywhere on this port.
-                # Recency-based: the flags self-expire resume_delay after the
-                # last keystroke, so no extra cap is needed here.
-                if port_typing or webview_typing:
-                    if prt not in deferring:
-                        deferring.add(prt)
-                        print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
-                    # Re-stamp every tick so readers (menubar icon) can treat a
-                    # stale stamp as inactive if the watcher dies mid-defer.
-                    _state.write_defer(sorted(deferring))
+                # Publish page-level typing for the monitor task, and skip
+                # webview handlers while the monitor holds the defer (it owns
+                # `deferring`, re-checked ~4x/s; recency self-expires
+                # resume_delay after the last keystroke).
+                page_typing[prt] = bool(port_typing)
+                if port_typing or prt in deferring:
                     continue
-                if prt in deferring:
-                    deferring.discard(prt)
-                    print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
-                    _state.write_defer(sorted(deferring))
 
                 for t in webviews:
                     # One session per webview; both handlers evaluated on it.
