@@ -191,6 +191,9 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 
 - Default working style: terse responses; tables when comparing options; lead with an
   explicit recommendation; give the bare command first, then variants.
+- **On releasing a new version, relaunch the running service** so it picks up the released code
+  (launchctl `kickstart -k gui/<uid>/com.yes2all.watcher` and `.../com.yes2all.menubar`), then verify the
+  new "watching ports ..." start line in the out log (user direction 2026-08-08).
 - Broad project reviews are defect hunts: prioritize concrete bugs, regressions, cross-platform failures,
   and missing tests; support findings with diagnostics or focused runtime evidence (2026-07-25).
 - Selector/DOM claims must be verified against a live editor via CDP probe before being recorded here.
