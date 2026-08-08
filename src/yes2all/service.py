@@ -34,14 +34,18 @@ def _launchd_kickstart(label: str) -> None:
 
 
 def _yes2all_executable() -> str:
-    """Resolve the absolute path to the installed `yes2all` console script."""
-    exe = shutil.which("yes2all")
-    if exe:
-        return exe
-    # Fallback: same dir as the python interpreter.
+    """Resolve the absolute path to the installed `yes2all` console script.
+
+    Prefer the running interpreter's own bin dir: `shutil.which` first would
+    let a *different* install that happens to be on PATH win, silently pinning
+    the service to a stale checkout/venv.
+    """
     candidate = Path(sys.executable).parent / "yes2all"
     if candidate.exists():
         return str(candidate)
+    exe = shutil.which("yes2all")
+    if exe:
+        return exe
     raise RuntimeError(
         "Could not locate the `yes2all` executable. Run `uv sync` first, then "
         "invoke `yes2all` from inside the project venv (e.g. `uv run yes2all service ...`)."
@@ -89,11 +93,12 @@ def read_installed_args() -> dict | None:
             data = plistlib.load(f)
         args = data.get("ProgramArguments", [])
         ports: list[int] = []
-        interval = 1
-        sweep_tabs = True
+        interval = 1.0
+        sweep_tabs = False  # match the CLI default
         countdown = 0.0
         max_defer = 0.0
         ignore_user_questions = True
+        answer_text_questions = True
         i = 0
         while i < len(args):
             a = args[i]
@@ -133,6 +138,10 @@ def read_installed_args() -> dict | None:
                 ignore_user_questions = True
             elif a == "--no-ignore-user-questions":
                 ignore_user_questions = False
+            elif a == "--answer-text-questions":
+                answer_text_questions = True
+            elif a == "--no-answer-text-questions":
+                answer_text_questions = False
             i += 1
         if not ports:
             ports = [9222]
@@ -143,9 +152,31 @@ def read_installed_args() -> dict | None:
             "countdown": countdown,
             "max_defer": max_defer,
             "ignore_user_questions": ignore_user_questions,
+            "answer_text_questions": answer_text_questions,
         }
     except Exception:
         return None
+
+
+def _watch_args(
+    ports: list[int],
+    interval: float,
+    sweep_tabs: bool,
+    countdown: float,
+    max_defer: float,
+    ignore_user_questions: bool,
+    answer_text_questions: bool = True,
+) -> list[str]:
+    """The `watch` argv shared by the launchd plist and the systemd unit."""
+    args: list[str] = ["watch"]
+    for p in ports:
+        args += ["--port", str(p)]
+    args += ["--interval", str(interval)]
+    args.append("--sweep-tabs" if sweep_tabs else "--no-sweep-tabs")
+    args += ["--countdown", str(countdown), "--max-defer", str(max_defer)]
+    args.append("--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions")
+    args.append("--answer-text-questions" if answer_text_questions else "--no-answer-text-questions")
+    return args
 
 
 def launchd_plist(
@@ -156,43 +187,24 @@ def launchd_plist(
     countdown: float = 0,
     max_defer: float = 0,
     ignore_user_questions: bool = True,
+    answer_text_questions: bool = True,
 ) -> str:
+    import plistlib
+
     exe = _yes2all_executable()
     log_dir.mkdir(parents=True, exist_ok=True)
-    stdout = log_dir / "yes2all.out.log"
-    stderr = log_dir / "yes2all.err.log"
-    sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
-    iuq_flag = "--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions"
-    port_args = "\n    ".join(f"<string>--port</string>   <string>{p}</string>" for p in ports)
-    countdown_args = f"\n    <string>--countdown</string><string>{countdown}</string>"
-    max_defer_args = f"\n    <string>--max-defer</string><string>{max_defer}</string>"
-    iuq_args = f"\n    <string>{iuq_flag}</string>"
-    src_dir = _src_dir()
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>            <string>{LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>{exe}</string>
-    <string>watch</string>
-    {port_args}
-    <string>--interval</string><string>{interval}</string>
-    <string>{sweep_flag}</string>{countdown_args}{max_defer_args}{iuq_args}
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PYTHONPATH</key>     <string>{src_dir}</string>
-  </dict>
-  <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <true/>
-  <key>StandardOutPath</key>  <string>{stdout}</string>
-  <key>StandardErrorPath</key><string>{stderr}</string>
-  <key>ProcessType</key>      <string>Background</string>
-</dict>
-</plist>
-"""
+    payload = {
+        "Label": LABEL,
+        "ProgramArguments": [exe]
+        + _watch_args(ports, interval, sweep_tabs, countdown, max_defer, ignore_user_questions, answer_text_questions),
+        "EnvironmentVariables": {"PYTHONPATH": _src_dir()},
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(log_dir / "yes2all.out.log"),
+        "StandardErrorPath": str(log_dir / "yes2all.err.log"),
+        "ProcessType": "Background",
+    }
+    return plistlib.dumps(payload, sort_keys=False).decode()
 
 
 def launchd_install(
@@ -202,6 +214,7 @@ def launchd_install(
     countdown: float = 0,
     max_defer: float = 0,
     ignore_user_questions: bool = True,
+    answer_text_questions: bool = True,
 ) -> None:
     plist_path = launchd_plist_path()
     log_dir = Path.home() / "Library" / "Logs" / "yes2all"
@@ -215,6 +228,7 @@ def launchd_install(
             countdown=countdown,
             max_defer=max_defer,
             ignore_user_questions=ignore_user_questions,
+            answer_text_questions=answer_text_questions,
         )
     )
     print(f"wrote {plist_path}")
@@ -328,33 +342,21 @@ def menubar_plist_path() -> Path:
 
 
 def _menubar_plist(log_dir: Path) -> str:
+    import plistlib
+
     exe = _yes2all_executable()
     log_dir.mkdir(parents=True, exist_ok=True)
-    stdout = log_dir / "menubar.out.log"
-    stderr = log_dir / "menubar.err.log"
-    src_dir = _src_dir()
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>            <string>{MENUBAR_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>{exe}</string>
-    <string>menubar</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PYTHONPATH</key>     <string>{src_dir}</string>
-  </dict>
-  <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <true/>
-  <key>LimitLoadToSessionType</key><string>Aqua</string>
-  <key>StandardOutPath</key>  <string>{stdout}</string>
-  <key>StandardErrorPath</key><string>{stderr}</string>
-</dict>
-</plist>
-"""
+    payload = {
+        "Label": MENUBAR_LABEL,
+        "ProgramArguments": [exe, "menubar"],
+        "EnvironmentVariables": {"PYTHONPATH": _src_dir()},
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "LimitLoadToSessionType": "Aqua",
+        "StandardOutPath": str(log_dir / "menubar.out.log"),
+        "StandardErrorPath": str(log_dir / "menubar.err.log"),
+    }
+    return plistlib.dumps(payload, sort_keys=False).decode()
 
 
 def menubar_install() -> None:
@@ -414,21 +416,21 @@ def systemd_unit(
     countdown: float = 0,
     max_defer: float = 0,
     ignore_user_questions: bool = True,
+    answer_text_questions: bool = True,
 ) -> str:
     exe = _yes2all_executable()
-    sweep_flag = "--sweep-tabs" if sweep_tabs else "--no-sweep-tabs"
-    iuq_flag = "--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions"
-    port_args = " ".join(f"--port {p}" for p in ports)
-    countdown_arg = f" --countdown {countdown}"
-    max_defer_arg = f" --max-defer {max_defer}"
     src_dir = _src_dir()
+    args = _watch_args(ports, interval, sweep_tabs, countdown, max_defer, ignore_user_questions, answer_text_questions)
+    # Quote the exe and env value: install paths may contain spaces (e.g. an
+    # iCloud-synced checkout) and an unquoted systemd unit fails to parse.
+    exec_start = " ".join([f'"{exe}"', *args])
     return f"""[Unit]
 Description=Yes2All — auto-approve agent tool prompts in Cursor / VS Code
 After=graphical-session.target
 
 [Service]
-Environment=PYTHONPATH={src_dir}
-ExecStart={exe} watch {port_args} --interval {interval} {sweep_flag}{countdown_arg}{max_defer_arg} {iuq_flag}
+Environment="PYTHONPATH={src_dir}"
+ExecStart={exec_start}
 Restart=always
 RestartSec=2
 
@@ -444,6 +446,7 @@ def systemd_install(
     countdown: float = 0,
     max_defer: float = 0,
     ignore_user_questions: bool = True,
+    answer_text_questions: bool = True,
 ) -> None:
     unit_path = systemd_unit_path()
     unit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,6 +458,7 @@ def systemd_install(
             countdown=countdown,
             max_defer=max_defer,
             ignore_user_questions=ignore_user_questions,
+            answer_text_questions=answer_text_questions,
         )
     )
     print(f"wrote {unit_path}")
@@ -501,6 +505,7 @@ def install(
     countdown: float = 0,
     max_defer: float = 0,
     ignore_user_questions: bool = True,
+    answer_text_questions: bool = True,
 ) -> None:
     sysname = platform.system()
     if sysname == "Darwin":
@@ -511,6 +516,7 @@ def install(
             countdown=countdown,
             max_defer=max_defer,
             ignore_user_questions=ignore_user_questions,
+            answer_text_questions=answer_text_questions,
         )
     elif sysname == "Linux":
         systemd_install(
@@ -520,6 +526,7 @@ def install(
             countdown=countdown,
             max_defer=max_defer,
             ignore_user_questions=ignore_user_questions,
+            answer_text_questions=answer_text_questions,
         )
     else:
         raise RuntimeError(
