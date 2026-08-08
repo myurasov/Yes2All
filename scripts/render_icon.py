@@ -102,8 +102,8 @@ def main() -> None:
 
     # Menubar checkmark (defer state — semi-transparent version of the normal
     # theme glyph while typing pauses approvals).
-    BLACK_DIM = (0, 0, 0, 110)
-    WHITE_DIM = (255, 255, 255, 140)
+    BLACK_DIM = (0, 0, 0, 150)
+    WHITE_DIM = (255, 255, 255, 180)
     render_check(22, OUT / "icon-defer-dark.png", BLACK_DIM, pad=MENU_PAD)
     render_check(44, OUT / "icon-defer-dark@2x.png", BLACK_DIM, pad=MENU_PAD)
     render_check(22, OUT / "icon-defer-light.png", WHITE_DIM, pad=MENU_PAD)
