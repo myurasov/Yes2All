@@ -22,6 +22,7 @@ from .finder import (
     CLICK_CODEX_PROMPT_JS,
     CLICK_FIRST_APPROVAL_JS,
     FIND_APPROVAL_BUTTONS_JS,
+    IFRAME_TYPING_PROBE_JS,
     SWEEP_TABS_AND_CLICK_JS,
     countdown_claude_js,
     countdown_codex_js,
@@ -328,11 +329,39 @@ def watch(
                             return
                         _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
 
-                # Defer webview (iframe) handlers while the user is typing in a
-                # page-level chat input on this port: the iframe target cannot
-                # see outer-page focus, so the skip has to happen here. Same
-                # max-defer cap as the JS guards, tracked in Python.
-                if port_typing and max_defer > 0:
+                # Scan iframe targets for Codex/Claude prompts (webview-hosted UI).
+                try:
+                    all_targets = await list_targets(port=prt)
+                except Exception:
+                    all_targets = []
+                # Agent prompts live in VS Code webviews; skip unrelated
+                # iframes rather than opening a WebSocket to each.
+                webviews = [
+                    t
+                    for t in all_targets
+                    if t.type == "iframe" and t.ws_url and "vscode-webview://" in f"{t.url} {t.title}"
+                ]
+
+                # Cross-frame typing check. One webview surfaces as several
+                # frame targets, and the user's caret and a pending prompt can
+                # live in different frame documents — so probe ALL webview
+                # frames (plus the page-level flag) before clicking in any.
+                webview_typing = False
+                if max_defer > 0:
+                    for t in webviews:
+                        try:
+                            async with CDPSession(t.ws_url) as s:
+                                raw_tp = await s.evaluate(IFRAME_TYPING_PROBE_JS)
+                            data_tp = json.loads(raw_tp) if isinstance(raw_tp, str) else raw_tp
+                            if data_tp.get("typing"):
+                                webview_typing = True
+                                break
+                        except Exception:
+                            continue
+
+                # Defer webview handlers while typing anywhere on this port,
+                # capped at max_defer (tracked in Python for this path).
+                if (port_typing or webview_typing) and max_defer > 0:
                     started = typing_since.setdefault(prt, time.monotonic())
                     if time.monotonic() - started < max_defer:
                         if prt not in deferring:
@@ -345,18 +374,7 @@ def watch(
                         deferring.discard(prt)
                         print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
 
-                # Scan iframe targets for Codex/Claude prompts (webview-hosted UI).
-                try:
-                    all_targets = await list_targets(port=prt)
-                except Exception:
-                    all_targets = []
-                for t in all_targets:
-                    if t.type != "iframe" or not t.ws_url:
-                        continue
-                    # Agent prompts live in VS Code webviews; skip unrelated
-                    # iframes rather than opening a WebSocket to each.
-                    if "vscode-webview://" not in f"{t.url} {t.title}":
-                        continue
+                for t in webviews:
                     # One session per webview; both handlers evaluated on it.
                     codex_js = js_cd_codex if use_countdown else js_codex
                     claude_js = js_cd_claude if use_countdown else js_claude

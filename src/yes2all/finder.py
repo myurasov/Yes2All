@@ -113,6 +113,18 @@ _JS_IFRAME_TYPING_GUARD = r"""function __y2aDocTyping(d) {
     return true;
   }"""
 
+# Read-only typing probe for webview frame targets. One webview can surface as
+# SEVERAL iframe CDP targets (verified live: the Claude panel shows up as 4);
+# the user's caret and a pending prompt can sit in different frame documents,
+# so the in-handler guard alone misses cross-frame typing. The watcher probes
+# every webview frame first and skips all webview handlers on the port if any
+# frame reports typing (cli.py owns the max-defer cap for this path).
+IFRAME_TYPING_PROBE_JS = (
+    "(() => {"
+    + _JS_IFRAME_TYPING_GUARD.replace("__MAX_DEFER_MS__", "0")
+    + "\n  return JSON.stringify({typing: __y2aDocTyping(document)});\n})()"
+)
+
 # Canonical synthetic click. Cursor 3.3+ (Electron 39 / Chromium 142) ignores
 # `.click()` and MouseEvent-only triplets on its React-managed approval
 # buttons — the full pointerdown/mousedown/pointerup/mouseup/click sequence at
@@ -1541,7 +1553,10 @@ SWEEP_TABS_AND_CLICK_JS = _expand_lib(SWEEP_TABS_AND_CLICK_JS)
 CLICK_CODEX_PROMPT_JS = _expand_lib(CLICK_CODEX_PROMPT_JS)
 DETECT_CHAT_TEXT_CONFIRM_JS = _expand_lib(DETECT_CHAT_TEXT_CONFIRM_JS)
 
+IFRAME_TYPING_PROBE_JS = _expand_lib(IFRAME_TYPING_PROBE_JS)
+
 _ALL_HANDLERS = {
+    "IFRAME_TYPING_PROBE_JS": IFRAME_TYPING_PROBE_JS,
     "FIND_APPROVAL_BUTTONS_JS": FIND_APPROVAL_BUTTONS_JS,
     "CLICK_FIRST_APPROVAL_JS": CLICK_FIRST_APPROVAL_JS,
     "COUNTDOWN_BADGE_JS": COUNTDOWN_BADGE_JS,
