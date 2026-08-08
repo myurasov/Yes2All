@@ -175,12 +175,13 @@ def watch(
     eval_timeout = 60.0 if sweep_tabs else 15.0
     js = with_max_defer(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, max_defer)
     js_cd = _prep(countdown_js(countdown)) if use_countdown else ""
-    js_cd_codex = countdown_codex_js(countdown) if use_countdown else ""
-    js_cd_claude = with_ignore_user_questions(countdown_claude_js(countdown), iuq) if use_countdown else ""
+    js_cd_codex = with_max_defer(countdown_codex_js(countdown), max_defer) if use_countdown else ""
+    js_cd_claude = _prep(countdown_claude_js(countdown)) if use_countdown else ""
+    js_codex = with_max_defer(CLICK_CODEX_PROMPT_JS, max_defer)
     js_text_confirm = with_max_defer(detect_chat_text_confirm_js(countdown), max_defer)
     js_chat_question = _prep(CLICK_CHAT_QUESTION_JS)
     js_chat_confirmation = with_max_defer(CLICK_CHAT_CONFIRMATION_JS, max_defer)
-    js_claude = with_ignore_user_questions(CLICK_CLAUDE_PROMPT_JS, iuq)
+    js_claude = _prep(CLICK_CLAUDE_PROMPT_JS)
     ports = list(port) if port else [9222]
 
     def _log_skipped(p_label: str, data: dict, agent: str) -> None:
@@ -226,8 +227,11 @@ def watch(
             flush=True,
         )
         down_ports: set[int] = set()
+        typing_since: dict[int, float] = {}
+        deferring: set[int] = set()
         while True:
             for prt in ports:
+                port_typing = False
                 try:
                     pages = await list_pages(port=prt)
                 except Exception as e:
@@ -253,6 +257,7 @@ def watch(
                         except Exception:
                             data_cd = {}
                         _log_skipped(f"{prt}/{p.title}", data_cd, "carousel")
+                        port_typing = port_typing or bool(data_cd.get("typing"))
                         cd_n = int(data_cd.get("count", 0) or 0)
                         if cd_n:
                             ts = time.strftime("%H:%M:%S")
@@ -296,6 +301,7 @@ def watch(
                         except Exception:
                             data_cc = {}
                         p_label = f"{prt}/{p.title}"
+                        port_typing = port_typing or bool(data.get("typing") or data.get("deferred"))
                         clicked = _summarize_click(p_label, data)
                         _log_skipped(p_label, data_cq, "carousel")
                         cq_n = int(data_cq.get("count", 0) or 0)
@@ -322,6 +328,23 @@ def watch(
                             return
                         _state.add_clicks(prt, int(clicked) + cq_n + cc_n)
 
+                # Defer webview (iframe) handlers while the user is typing in a
+                # page-level chat input on this port: the iframe target cannot
+                # see outer-page focus, so the skip has to happen here. Same
+                # max-defer cap as the JS guards, tracked in Python.
+                if port_typing and max_defer > 0:
+                    started = typing_since.setdefault(prt, time.monotonic())
+                    if time.monotonic() - started < max_defer:
+                        if prt not in deferring:
+                            deferring.add(prt)
+                            print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
+                        continue
+                else:
+                    typing_since.pop(prt, None)
+                    if prt in deferring:
+                        deferring.discard(prt)
+                        print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
+
                 # Scan iframe targets for Codex/Claude prompts (webview-hosted UI).
                 try:
                     all_targets = await list_targets(port=prt)
@@ -335,7 +358,7 @@ def watch(
                     if "vscode-webview://" not in f"{t.url} {t.title}":
                         continue
                     # One session per webview; both handlers evaluated on it.
-                    codex_js = js_cd_codex if use_countdown else CLICK_CODEX_PROMPT_JS
+                    codex_js = js_cd_codex if use_countdown else js_codex
                     claude_js = js_cd_claude if use_countdown else js_claude
                     raw_cx: object = "{}"
                     raw_cl: object = "{}"

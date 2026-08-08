@@ -58,6 +58,30 @@ def test_every_clicking_handler_uses_pointer_sequence():
             assert "pointerdown" in js, f"{name} clicks without PointerEvent (Cursor 3.3+ ignores it)"
 
 
+def test_iframe_handlers_have_typing_guard():
+    """Claude/Codex webview handlers must defer while the user types in the panel.
+
+    The guard must be focus-aware (hasFocus) — activeElement alone persists
+    after focus leaves the doc and would defer every click by max-defer.
+    """
+    for name in (
+        "CLICK_CLAUDE_PROMPT_JS",
+        "COUNTDOWN_CLAUDE_BADGE_JS",
+        "CLICK_CODEX_PROMPT_JS",
+        "COUNTDOWN_CODEX_BADGE_JS",
+    ):
+        js = PREP_HANDLERS[name]
+        assert "__y2aDocTyping" in js, f"{name} missing iframe typing guard"
+        assert "hasFocus" in js, f"{name} typing guard is not focus-aware"
+        assert "shouldDeferForTyping()" in js, f"{name} never consults the defer guard"
+        assert "__MAX_DEFER_MS__" in js, f"{name} lost the max-defer placeholder"
+
+
+def test_page_handlers_report_typing():
+    for name in ("FIND_APPROVAL_BUTTONS_JS", "COUNTDOWN_BADGE_JS", "SWEEP_TABS_AND_CLICK_JS"):
+        assert "typing: userIsTyping()" in PREP_HANDLERS[name], f"{name} does not report typing state"
+
+
 def test_text_confirm_has_typing_guard():
     assert "shouldDeferForTyping" in finder.DETECT_CHAT_TEXT_CONFIRM_JS
     assert "__MAX_DEFER_MS__" in finder.DETECT_CHAT_TEXT_CONFIRM_JS

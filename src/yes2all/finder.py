@@ -72,6 +72,47 @@ _JS_FOCUS_GUARD = r"""const __y2aOrigActive = document.activeElement;
     } catch (_) {}
   }"""
 
+# Typing guard for webview-iframe handlers (Claude / Codex). Their CDP target
+# is the webview frame document, where the page-level class-whitelist guard is
+# useless: the user's input lives in the nested #active-frame doc (typing in
+# the extension panel), or outside the webview entirely (handled in cli.py).
+# Requires document.hasFocus() at each level — activeElement persists as the
+# last-focused element even when focus left the doc, and trusting it would
+# defer every click by the full max-defer window.
+_JS_IFRAME_TYPING_GUARD = r"""function __y2aDocTyping(d) {
+    let guard = 0;
+    while (d && guard++ < 5) {
+      try { if (!d.hasFocus()) return false; } catch (_) { return false; }
+      const a = d.activeElement;
+      if (!a || a === d.body || a === d.documentElement) return false;
+      const tag = a.tagName;
+      if (tag === "IFRAME" || tag === "FRAME" || tag === "WEBVIEW") {
+        try { d = a.contentDocument; continue; } catch (_) { return false; }
+      }
+      return tag === "INPUT" || tag === "TEXTAREA" || a.isContentEditable === true;
+    }
+    return false;
+  }
+  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
+  function shouldDeferForTyping() {
+    if (__Y2A_MAX_DEFER_MS === 0) return false;
+    if (!__y2aDocTyping(document)) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    const now = Date.now();
+    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
+    if (!start) {
+      start = now;
+      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
+    }
+    if (now - start >= __Y2A_MAX_DEFER_MS) {
+      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
+      return false;
+    }
+    return true;
+  }"""
+
 # Canonical synthetic click. Cursor 3.3+ (Electron 39 / Chromium 142) ignores
 # `.click()` and MouseEvent-only triplets on its React-managed approval
 # buttons — the full pointerdown/mousedown/pointerup/mouseup/click sequence at
@@ -266,7 +307,7 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     if (!visible(target)) continue;
     results.push(describe(target));
   }
-  return JSON.stringify({ url: location.href, count: results.length, buttons: results });
+  return JSON.stringify({ url: location.href, count: results.length, buttons: results, typing: userIsTyping() });
 })()
 """
 
@@ -549,7 +590,7 @@ COUNTDOWN_BADGE_JS = r"""
     if (p && !p.getAttribute(BADGE_ATTR)) b.remove();
   }
 
-  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped});
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped, typing: userIsTyping()});
 })()
 """
 
@@ -560,6 +601,10 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
   const DELAY_MS = __COUNTDOWN_SECS__ * 1000;
   const POSITIVE = /^yes\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
+  __Y2A_IFRAME_TYPING_GUARD__
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, pending: 0, results: [], clicked: [], skipped: [], deferred: "user-typing"});
+  }
   const BADGE_ATTR = "data-y2a-deadline";
   const BADGE_CLS  = "y2a-countdown-badge";
 
@@ -644,6 +689,10 @@ CLICK_CLAUDE_PROMPT_JS = r"""
 (() => {
   const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip|other)\b/i;
+  __Y2A_IFRAME_TYPING_GUARD__
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, pending: 0, results: [], clicked: [], skipped: [], deferred: "user-typing"});
+  }
   const BADGE_CLS = "y2a-countdown-badge";
 
   __Y2A_REAL_CLICK_FN__
@@ -740,6 +789,10 @@ COUNTDOWN_CLAUDE_BADGE_JS = r"""
   const DELAY_MS = __COUNTDOWN_SECS__ * 1000;
   const POSITIVE = /^(yes|allow|approve|accept|run|continue|confirm|ok|submit)\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip|other)\b/i;
+  __Y2A_IFRAME_TYPING_GUARD__
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, pending: 0, results: [], clicked: [], skipped: [], deferred: "user-typing"});
+  }
   const BADGE_ATTR = "data-y2a-deadline";
   const BADGE_CLS  = "y2a-countdown-badge";
 
@@ -1160,7 +1213,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
     setTimeout(__y2aRestoreFocus, 0);
     setTimeout(__y2aRestoreFocus, 80);
     results.push({ tab: "<active>", clicked: d });
-    return JSON.stringify({ clicked: results.length, results });
+    return JSON.stringify({ clicked: results.length, results, typing: userIsTyping() });
   }
 
   // 2) Iterate Cursor chat tabs. Cursor chats are editor tabs that contain a
@@ -1214,7 +1267,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   setTimeout(__y2aRestoreFocus, 0);
   setTimeout(__y2aRestoreFocus, 120);
 
-  return JSON.stringify({ clicked: results.filter(r => r.clicked).length, results });
+  return JSON.stringify({ clicked: results.filter(r => r.clicked).length, results, typing: userIsTyping() });
 })()
 """
 
@@ -1232,6 +1285,10 @@ CLICK_CODEX_PROMPT_JS = r"""
 (() => {
   const POSITIVE = /^yes\b/i;
   const NEGATIVE = /^(no|stop|cancel|deny|reject|skip)\b/i;
+  __Y2A_IFRAME_TYPING_GUARD__
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({url: location.href, count: 0, pending: 0, results: [], clicked: [], skipped: [], deferred: "user-typing"});
+  }
 
   __Y2A_REAL_CLICK_FN__
   const realClick = __y2aRealClick;
@@ -1468,6 +1525,7 @@ def _expand_lib(js: str) -> str:
         js.replace("__Y2A_TYPING_GUARD_FNS__", _JS_TYPING_GUARD)
         .replace("__Y2A_FOCUS_GUARD__", _JS_FOCUS_GUARD)
         .replace("__Y2A_REAL_CLICK_FN__", _JS_REAL_CLICK_FN)
+        .replace("__Y2A_IFRAME_TYPING_GUARD__", _JS_IFRAME_TYPING_GUARD)
     )
 
 
@@ -1500,6 +1558,7 @@ for _name, _js in _ALL_HANDLERS.items():
     assert "__Y2A_TYPING_GUARD_FNS__" not in _js, f"{_name}: unexpanded typing-guard token"
     assert "__Y2A_FOCUS_GUARD__" not in _js, f"{_name}: unexpanded focus-guard token"
     assert "__Y2A_REAL_CLICK_FN__" not in _js, f"{_name}: unexpanded real-click token"
+    assert "__Y2A_IFRAME_TYPING_GUARD__" not in _js, f"{_name}: unexpanded iframe-typing token"
     # No handler may ship a MouseEvent-only synthetic click: every realClick
     # must route through the canonical pointer-sequence __y2aRealClick.
     if "realClick" in _js:
