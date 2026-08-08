@@ -26,7 +26,9 @@ repo's git log).
 - lint/format: `uv run ruff format <paths>` after every edit; config in `pyproject.toml`
   (`[tool.ruff]`, line length 120, double quotes). VS Code formats on save via `.vscode/settings.json`
   (needs the `charliermarsh.ruff` extension).
-- no test suite yet (a 2026-07-25 review direction: hunt defects, prioritize missing tests).
+- test: `PYTHONPATH="$(pwd)/src" .venv/bin/python -m pytest tests/ -q` (pytest in the dev group since
+  2026-08-08). Covers plist/systemd round-trips (incl. spaced paths), JS placeholder substitutions, state
+  persistence, and a `node --check` syntax sweep over every fully-prepped JS handler.
 - **On an iCloud Drive checkout, `uv run yes2all` breaks** - prefix with `PYTHONPATH="$(pwd)/src"`
   (see iCloud constraints below).
 - Editors under test must be launched with `--remote-debugging-port` (Cursor 9222, VS Code 9333 by
@@ -121,12 +123,21 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 ## Click Handlers (finder.py)
 
 - Per tick, per port, the service evaluates on each page target: the Cursor finder (or sweep variant),
-  `CLICK_CHAT_QUESTION_JS`, `CLICK_CHAT_CONFIRMATION_JS`, `DETECT_CHAT_TEXT_CONFIRM_JS`; plus iframe
-  targets: `CLICK_CODEX_PROMPT_JS`, `CLICK_CLAUDE_PROMPT_JS`.
+  `CLICK_CHAT_QUESTION_JS`, `CLICK_CHAT_CONFIRMATION_JS`, `DETECT_CHAT_TEXT_CONFIRM_JS`; plus
+  `vscode-webview://` iframe targets (others skipped): `CLICK_CODEX_PROMPT_JS`, `CLICK_CLAUDE_PROMPT_JS`
+  (one CDP session per webview, both handlers on it).
 - **Clicks must be full synthetic sequences**: `pointerdown -> mousedown -> pointerup -> mouseup -> click`
   with `composed:true`, coords, `buttons`, `pointerType:'mouse'`. Cursor 3.3+ ignores `.click()` and
-  MouseEvent-only triplets (React listens for PointerEvent first). Shared `_REAL_CLICK_SNIPPET` /
-  JS `realClick()`; tab activation uses the same sequence.
+  MouseEvent-only triplets (React listens for PointerEvent first). Since 2026-08-08 there is ONE canonical
+  click (`__y2aRealClick` in `_JS_REAL_CLICK_FN`), injected into every handler via `__Y2A_*__` lib tokens
+  expanded at import (`_expand_lib`); the typing-guard and focus-restore helpers are shared the same way.
+  Import-time asserts fail loudly if a token is unexpanded or a handler ships a non-pointer realClick -
+  never hand-copy a click implementation again.
+- CDP evaluates carry timeouts (`cdp.DEFAULT_TIMEOUT` 15s; sweep gets 60s) so a suspended renderer can't
+  freeze the watch loop. Port-unreachable logs only fire on down/up transitions.
+- `--answer-text-questions/--no-answer-text-questions` (default on, plumbed through service/plist/menubar
+  config) controls the plain-text "shall I proceed?" auto-Yes; that handler now also honors the
+  defer-while-typing guard (it used to steal focus mid-typing).
 - Positive verbs: `yes|allow|approve|accept|run|continue|confirm|ok`; negative:
   `no|stop|cancel|deny|reject|skip`. Carousel falls back to the first non-negative option when no
   positive matches. `data-y2a-*` attributes prevent re-answering.
