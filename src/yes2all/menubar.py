@@ -754,12 +754,10 @@ class Yes2AllApp(rumps.App):
             rumps.notification("Yes2All", "Typing Resume Delay updated", self._resume_delay_title())
 
     def on_about(self, _: object) -> None:
-        try:
-            from importlib.metadata import version as _pkg_version
+        # Use the package's own __version__: dist metadata can be stale when
+        # the code is loaded via PYTHONPATH over an old editable install.
+        from . import __version__ as ver
 
-            ver = _pkg_version("yes2all")
-        except Exception:
-            ver = "dev"
         loaded = _is_loaded()
         ports_str = ", ".join(str(p) for p in self.ports) or "(none)"
         msg = (
