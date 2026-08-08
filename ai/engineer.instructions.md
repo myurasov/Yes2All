@@ -200,6 +200,10 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 - **On releasing a new version, relaunch the running service** so it picks up the released code
   (launchctl `kickstart -k gui/<uid>/com.yes2all.watcher` and `.../com.yes2all.menubar`), then verify the
   new "watching ports ..." start line in the out log (user direction 2026-08-08).
+- **Every release also gets deployed to the second machine** (user direction 2026-08-08): the host,
+  checkout path, and rsync-based recipe (its git is unusable) live in `ai/.memory/resources.md`. Deploy,
+  reinstall the service preserving that machine's installed plist settings, and verify its out-log start
+  line shows the new version's flags. Do this in the same turn as the release, without being asked.
 - Broad project reviews are defect hunts: prioritize concrete bugs, regressions, cross-platform failures,
   and missing tests; support findings with diagnostics or focused runtime evidence (2026-07-25).
 - Selector/DOM claims must be verified against a live editor via CDP probe before being recorded here.
