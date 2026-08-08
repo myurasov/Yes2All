@@ -13,9 +13,29 @@ from __future__ import annotations
 # PointerEvent.
 # ---------------------------------------------------------------------------
 
-# userIsTyping + shouldDeferForTyping. Uses the __MAX_DEFER_MS__ runtime
-# placeholder (substituted per-invocation by with_max_defer()).
-_JS_TYPING_GUARD = r"""function userIsTyping() {
+# userIsTyping + shouldDeferForTyping. "Typing" is keystroke-recency-based:
+# a capture-phase keydown hook (installed idempotently on every evaluation)
+# stamps data-y2a-last-key, and typing holds while the caret is in a chat
+# input AND the last keystroke is younger than the __RESUME_MS__ placeholder
+# (substituted per-invocation by with_resume_delay(); 0 disables deferring).
+_JS_TYPING_GUARD = r"""const __Y2A_RESUME_MS = __RESUME_MS__;
+  function __y2aHookKeys(d) {
+    try {
+      const w = d.defaultView;
+      if (w && !w.__y2aKeyHook) {
+        w.__y2aKeyHook = 1;
+        w.addEventListener("keydown", function () {
+          try { d.documentElement.setAttribute("data-y2a-last-key", String(Date.now())); } catch (_) {}
+        }, true);
+      }
+    } catch (_) {}
+  }
+  __y2aHookKeys(document);
+  function __y2aKeyRecent(d) {
+    const last = parseInt(d.documentElement.getAttribute("data-y2a-last-key") || "0", 10);
+    return last > 0 && (Date.now() - last) < __Y2A_RESUME_MS;
+  }
+  function userIsTyping() {
     const a = document.activeElement;
     if (!a || a === document.body || a === document.documentElement) return false;
     const tag = a.tagName;
@@ -31,24 +51,9 @@ _JS_TYPING_GUARD = r"""function userIsTyping() {
       a.closest("[class*='aislash-editor']")
     ));
   }
-  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
   function shouldDeferForTyping() {
-    if (__Y2A_MAX_DEFER_MS === 0) return false;
-    if (!userIsTyping()) {
-      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
-      return false;
-    }
-    const now = Date.now();
-    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
-    if (!start) {
-      start = now;
-      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
-    }
-    if (now - start >= __Y2A_MAX_DEFER_MS) {
-      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
-      return false;
-    }
-    return true;
+    if (__Y2A_RESUME_MS === 0) return false;
+    return userIsTyping() && __y2aKeyRecent(document);
   }"""
 
 # Focus/caret snapshot + restore (same-page handlers only).
@@ -79,7 +84,28 @@ _JS_FOCUS_GUARD = r"""const __y2aOrigActive = document.activeElement;
 # Requires document.hasFocus() at each level — activeElement persists as the
 # last-focused element even when focus left the doc, and trusting it would
 # defer every click by the full max-defer window.
-_JS_IFRAME_TYPING_GUARD = r"""function __y2aDocTyping(d) {
+_JS_IFRAME_TYPING_GUARD = r"""const __Y2A_RESUME_MS = __RESUME_MS__;
+  function __y2aHookKeys(d) {
+    try {
+      const w = d.defaultView;
+      if (w && !w.__y2aKeyHook) {
+        w.__y2aKeyHook = 1;
+        w.addEventListener("keydown", function () {
+          try { d.documentElement.setAttribute("data-y2a-last-key", String(Date.now())); } catch (_) {}
+        }, true);
+      }
+    } catch (_) {}
+  }
+  __y2aHookKeys(document);
+  try {
+    const __y2aInner = document.querySelector("#active-frame");
+    if (__y2aInner && __y2aInner.contentDocument) __y2aHookKeys(__y2aInner.contentDocument);
+  } catch (_) {}
+  function __y2aKeyRecent(d) {
+    const last = parseInt(d.documentElement.getAttribute("data-y2a-last-key") || "0", 10);
+    return last > 0 && (Date.now() - last) < __Y2A_RESUME_MS;
+  }
+  function __y2aDocTyping(d) {
     let guard = 0;
     while (d && guard++ < 5) {
       try { if (!d.hasFocus()) return false; } catch (_) { return false; }
@@ -89,28 +115,14 @@ _JS_IFRAME_TYPING_GUARD = r"""function __y2aDocTyping(d) {
       if (tag === "IFRAME" || tag === "FRAME" || tag === "WEBVIEW") {
         try { d = a.contentDocument; continue; } catch (_) { return false; }
       }
-      return tag === "INPUT" || tag === "TEXTAREA" || a.isContentEditable === true;
+      if (!(tag === "INPUT" || tag === "TEXTAREA" || a.isContentEditable === true)) return false;
+      return __y2aKeyRecent(d);
     }
     return false;
   }
-  const __Y2A_MAX_DEFER_MS = __MAX_DEFER_MS__;
   function shouldDeferForTyping() {
-    if (__Y2A_MAX_DEFER_MS === 0) return false;
-    if (!__y2aDocTyping(document)) {
-      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
-      return false;
-    }
-    const now = Date.now();
-    let start = parseInt(document.documentElement.getAttribute("data-y2a-defer-start") || "0", 10);
-    if (!start) {
-      start = now;
-      try { document.documentElement.setAttribute("data-y2a-defer-start", String(start)); } catch (_) {}
-    }
-    if (now - start >= __Y2A_MAX_DEFER_MS) {
-      try { document.documentElement.removeAttribute("data-y2a-defer-start"); } catch (_) {}
-      return false;
-    }
-    return true;
+    if (__Y2A_RESUME_MS === 0) return false;
+    return __y2aDocTyping(document);
   }"""
 
 # Read-only typing probe for webview frame targets. One webview can surface as
@@ -120,9 +132,7 @@ _JS_IFRAME_TYPING_GUARD = r"""function __y2aDocTyping(d) {
 # every webview frame first and skips all webview handlers on the port if any
 # frame reports typing (cli.py owns the max-defer cap for this path).
 IFRAME_TYPING_PROBE_JS = (
-    "(() => {"
-    + _JS_IFRAME_TYPING_GUARD.replace("__MAX_DEFER_MS__", "0")
-    + "\n  return JSON.stringify({typing: __y2aDocTyping(document)});\n})()"
+    "(() => {" + _JS_IFRAME_TYPING_GUARD + "\n  return JSON.stringify({typing: shouldDeferForTyping()});\n})()"
 )
 
 # Canonical synthetic click. Cursor 3.3+ (Electron 39 / Chromium 142) ignores
@@ -319,7 +329,7 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     if (!visible(target)) continue;
     results.push(describe(target));
   }
-  return JSON.stringify({ url: location.href, count: results.length, buttons: results, typing: userIsTyping() });
+  return JSON.stringify({ url: location.href, count: results.length, buttons: results, typing: shouldDeferForTyping() });
 })()
 """
 
@@ -602,7 +612,7 @@ COUNTDOWN_BADGE_JS = r"""
     if (p && !p.getAttribute(BADGE_ATTR)) b.remove();
   }
 
-  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped, typing: userIsTyping()});
+  return JSON.stringify({url: location.href, count: clicked.length, pending: pending.length, clicked, pendingDetails: pending, skipped, typing: shouldDeferForTyping()});
 })()
 """
 
@@ -1225,7 +1235,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
     setTimeout(__y2aRestoreFocus, 0);
     setTimeout(__y2aRestoreFocus, 80);
     results.push({ tab: "<active>", clicked: d });
-    return JSON.stringify({ clicked: results.length, results, typing: userIsTyping() });
+    return JSON.stringify({ clicked: results.length, results, typing: shouldDeferForTyping() });
   }
 
   // 2) Iterate Cursor chat tabs. Cursor chats are editor tabs that contain a
@@ -1279,7 +1289,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
   setTimeout(__y2aRestoreFocus, 0);
   setTimeout(__y2aRestoreFocus, 120);
 
-  return JSON.stringify({ clicked: results.filter(r => r.clicked).length, results, typing: userIsTyping() });
+  return JSON.stringify({ clicked: results.filter(r => r.clicked).length, results, typing: shouldDeferForTyping() });
 })()
 """
 
@@ -1499,15 +1509,15 @@ def detect_chat_text_confirm_js(seconds: float) -> str:
     return DETECT_CHAT_TEXT_CONFIRM_JS.replace("__COUNTDOWN_SECS__", str(seconds))
 
 
-def with_max_defer(js: str, max_defer_seconds: float) -> str:
-    """Substitute __MAX_DEFER_MS__ in *js* with the configured timeout.
+def with_resume_delay(js: str, resume_delay_seconds: float) -> str:
+    """Substitute __RESUME_MS__ in *js* with the typing-resume delay.
 
-    `max_defer_seconds == 0` disables the type-defer guard entirely (the JS
-    handler clicks immediately even when the user has focus in a chat input).
-    Other values are converted to milliseconds for the JS timer.
+    Approvals are deferred while the caret sits in a chat input AND the last
+    keystroke is younger than this many seconds; they resume that long after
+    the user stops typing. ``0`` disables defer-while-typing entirely.
     """
-    ms = int(max(0.0, float(max_defer_seconds)) * 1000)
-    return js.replace("__MAX_DEFER_MS__", str(ms))
+    ms = int(max(0.0, float(resume_delay_seconds)) * 1000)
+    return js.replace("__RESUME_MS__", str(ms))
 
 
 def with_ignore_user_questions(js: str, ignore: bool) -> str:

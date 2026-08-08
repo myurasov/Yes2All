@@ -38,10 +38,10 @@ repo's git log).
 ## Service Operations
 
 - Reload after code changes: `uv run yes2all service uninstall && uv run yes2all service install
-  --port 9222 --port 9333 --interval 1` (add `--countdown <C> --max-defer <M> [--no-sweep-tabs]` to
+  --port 9222 --port 9333 --interval 1` (add `--countdown <C> --resume-delay <R> [--no-sweep-tabs]` to
   match the previous install; read existing args with
   `/usr/libexec/PlistBuddy -c "Print :ProgramArguments" ~/Library/LaunchAgents/com.yes2all.watcher.plist`).
-- All flags (`--port`, `--interval`, `--countdown`, `--max-defer`, `--sweep-tabs`) are persisted into the
+- All flags (`--port`, `--interval`, `--countdown`, `--resume-delay`, `--sweep-tabs`) are persisted into the
   launchd plist / systemd unit `ExecStart`; changing them requires uninstall + reinstall (or the menubar,
   which does this for you). `--countdown` is always written, even when 0.
 - macOS labels: `com.yes2all.watcher` and `com.yes2all.menubar` (`LimitLoadToSessionType=Aqua`), plists in
@@ -155,23 +155,23 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 
 - Synthetic clicks displace in-page focus (the editor re-focuses the chat that owned the clicked button).
   Focus-restore from a saved element does not survive Cursor's tab unmount/remount - the real fix is
-  **defer-while-typing**: `shouldDeferForTyping()` bails out of every same-page handler while
-  `document.activeElement` is inside a known chat-input container (`.composer-bar`,
-  `[class*='composer-input']`, `[class*='aislash-editor']`, `.chat-editor-container`,
-  `.interactive-session`, `.chat-widget`, `[class*='chat-editor']`).
-- `--max-defer N` (default 300s, 0 = always click) caps the defer: first defer stamps
-  `<html data-y2a-defer-start>`; once exceeded the click fires through. `with_max_defer(js, secs)` in
-  `finder.py` substitutes the placeholder; call sites in `cli.py`.
-- Iframe handlers (Codex / Claude) are **not** gated - their `document.activeElement` is the iframe doc,
-  not the user's outer chat input. If focus-loss reports come in, gate in `cli.py` by querying the page
-  target once per port per tick.
+  **defer-while-typing**, and since 1.3.0 it is **keystroke-recency-based**: a capture-phase keydown hook
+  stamps `data-y2a-last-key` per document, and `shouldDeferForTyping()` holds while the caret is in a
+  chat input (page handlers: known chat-input containers; webview handlers: any input, focus-chain via
+  `hasFocus()` + `#active-frame`) AND the last keystroke is younger than `--resume-delay` (default 3s,
+  0 disables). Approvals resume that long after the last keystroke - there is no separate cap
+  (`--max-defer` was removed in 1.3.0; the flag is still accepted hidden as a no-op for old units).
+- Webview (Claude/Codex) prompts: the watcher probes ALL webview frames per port
+  (`IFRAME_TYPING_PROBE_JS`) and skips every webview handler while any frame - or any page handler -
+  reports typing (see the multi-frame webview note above). `with_resume_delay(js, secs)` in `finder.py`
+  substitutes the placeholder; call sites in `cli.py`.
 
 ## Menu-Bar App (macOS)
 
 - `menubar.py` (rumps): run foreground `uv run yes2all menubar`; auto-start via
   `service install-menubar` / `uninstall-menubar`.
 - Hides the Dock icon via `setActivationPolicy_(1)` (NSApplicationActivationPolicyAccessory).
-- Config persistence: menubar settings (ports, interval, sweep, countdown, max-defer, launch apps) go to
+- Config persistence: menubar settings (ports, interval, sweep, countdown, resume-delay, launch apps) go to
   `config.json` in the platform data dir via `state.write_config()`; on startup it hydrates from
   `config.json`, then overrides from the installed plist (`service.read_installed_args()`).
 - Ports UI: `KNOWN_PORTS` = 9222 Cursor, 9333 VS Code; labels live-detected via `/json/version`;

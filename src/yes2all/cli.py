@@ -29,7 +29,7 @@ from .finder import (
     countdown_js,
     detect_chat_text_confirm_js,
     with_ignore_user_questions,
-    with_max_defer,
+    with_resume_delay,
 )
 
 app = typer.Typer(add_completion=False, help="Auto-approve agent tool prompts in Cursor / VS Code.")
@@ -64,7 +64,7 @@ def probe(
             print("No page targets found.")
             return
         # Debug command: no typing-deferral (max_defer 0 = always report/click).
-        js = with_max_defer(CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS, 0)
+        js = with_resume_delay(CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS, 0)
         total = 0
         for p in pages:
             print(f"\n[page] {p.title}")
@@ -137,13 +137,17 @@ def watch(
         float,
         typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
     ] = 3,
-    max_defer: Annotated[
+    resume_delay: Annotated[
         float,
         typer.Option(
-            "--max-defer",
-            help="Max seconds to defer auto-click while user is typing in a chat input "
-            "(0=disable deferring; click immediately even while typing).",
+            "--resume-delay",
+            help="Seconds after your last keystroke before deferred approvals resume "
+            "(0=disable defer-while-typing; click immediately even while typing).",
         ),
+    ] = 3,
+    max_defer: Annotated[
+        float,
+        typer.Option("--max-defer", hidden=True, help="Deprecated; ignored."),
     ] = 0,
     ignore_user_questions: Annotated[
         bool,
@@ -164,24 +168,25 @@ def watch(
     ] = True,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
+    del max_defer  # deprecated no-op, accepted for old service definitions
     use_countdown = countdown > 0
     iuq = ignore_user_questions
 
     def _prep(js: str) -> str:
-        """Apply the max-defer and ignore-user-questions substitutions."""
-        return with_ignore_user_questions(with_max_defer(js, max_defer), iuq)
+        """Apply the resume-delay and ignore-user-questions substitutions."""
+        return with_ignore_user_questions(with_resume_delay(js, resume_delay), iuq)
 
     # A tab sweep legitimately runs ~1.5s per inactive chat tab; give it a
     # far larger CDP deadline than single-shot handlers.
     eval_timeout = 60.0 if sweep_tabs else 15.0
-    js = with_max_defer(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, max_defer)
+    js = with_resume_delay(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, resume_delay)
     js_cd = _prep(countdown_js(countdown)) if use_countdown else ""
-    js_cd_codex = with_max_defer(countdown_codex_js(countdown), max_defer) if use_countdown else ""
+    js_cd_codex = with_resume_delay(countdown_codex_js(countdown), resume_delay) if use_countdown else ""
     js_cd_claude = _prep(countdown_claude_js(countdown)) if use_countdown else ""
-    js_codex = with_max_defer(CLICK_CODEX_PROMPT_JS, max_defer)
-    js_text_confirm = with_max_defer(detect_chat_text_confirm_js(countdown), max_defer)
+    js_codex = with_resume_delay(CLICK_CODEX_PROMPT_JS, resume_delay)
+    js_text_confirm = with_resume_delay(detect_chat_text_confirm_js(countdown), resume_delay)
     js_chat_question = _prep(CLICK_CHAT_QUESTION_JS)
-    js_chat_confirmation = with_max_defer(CLICK_CHAT_CONFIRMATION_JS, max_defer)
+    js_chat_confirmation = with_resume_delay(CLICK_CHAT_CONFIRMATION_JS, resume_delay)
     js_claude = _prep(CLICK_CLAUDE_PROMPT_JS)
     ports = list(port) if port else [9222]
 
@@ -223,13 +228,13 @@ def watch(
     async def _run() -> None:
         print(
             f"watching ports {ports} every {interval}s "
-            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, max_defer={max_defer}s, "
+            f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, resume_delay={resume_delay}s, "
             f"ignore_user_questions={iuq}, answer_text_questions={answer_text_questions}) ...",
             flush=True,
         )
         down_ports: set[int] = set()
-        typing_since: dict[int, float] = {}
         deferring: set[int] = set()
+        js_iframe_probe = with_resume_delay(IFRAME_TYPING_PROBE_JS, resume_delay)
         while True:
             for prt in ports:
                 port_typing = False
@@ -347,11 +352,11 @@ def watch(
                 # live in different frame documents — so probe ALL webview
                 # frames (plus the page-level flag) before clicking in any.
                 webview_typing = False
-                if max_defer > 0:
+                if resume_delay > 0:
                     for t in webviews:
                         try:
                             async with CDPSession(t.ws_url) as s:
-                                raw_tp = await s.evaluate(IFRAME_TYPING_PROBE_JS)
+                                raw_tp = await s.evaluate(js_iframe_probe)
                             data_tp = json.loads(raw_tp) if isinstance(raw_tp, str) else raw_tp
                             if data_tp.get("typing"):
                                 webview_typing = True
@@ -359,20 +364,17 @@ def watch(
                         except Exception:
                             continue
 
-                # Defer webview handlers while typing anywhere on this port,
-                # capped at max_defer (tracked in Python for this path).
-                if (port_typing or webview_typing) and max_defer > 0:
-                    started = typing_since.setdefault(prt, time.monotonic())
-                    if time.monotonic() - started < max_defer:
-                        if prt not in deferring:
-                            deferring.add(prt)
-                            print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
-                        continue
-                else:
-                    typing_since.pop(prt, None)
-                    if prt in deferring:
-                        deferring.discard(prt)
-                        print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
+                # Defer webview handlers while typing anywhere on this port.
+                # Recency-based: the flags self-expire resume_delay after the
+                # last keystroke, so no extra cap is needed here.
+                if port_typing or webview_typing:
+                    if prt not in deferring:
+                        deferring.add(prt)
+                        print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
+                    continue
+                if prt in deferring:
+                    deferring.discard(prt)
+                    print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
 
                 for t in webviews:
                     # One session per webview; both handlers evaluated on it.
@@ -450,12 +452,16 @@ def service_install(
         float,
         typer.Option(help="Seconds to show countdown badge before clicking (0=instant)."),
     ] = 3,
-    max_defer: Annotated[
+    resume_delay: Annotated[
         float,
         typer.Option(
-            "--max-defer",
-            help="Max seconds to defer auto-click while user is typing (0=disable deferring).",
+            "--resume-delay",
+            help="Seconds after the last keystroke before deferred approvals resume (0=disable).",
         ),
+    ] = 3,
+    max_defer: Annotated[
+        float,
+        typer.Option("--max-defer", hidden=True, help="Deprecated; ignored."),
     ] = 0,
     ignore_user_questions: Annotated[
         bool,
@@ -478,7 +484,7 @@ def service_install(
         interval,
         sweep_tabs=sweep_tabs,
         countdown=countdown,
-        max_defer=max_defer,
+        resume_delay=resume_delay,
         ignore_user_questions=ignore_user_questions,
         answer_text_questions=answer_text_questions,
     )

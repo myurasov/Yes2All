@@ -80,7 +80,7 @@ def read_installed_args() -> dict | None:
     """Parse the installed launchd plist.
 
     Returns dict with keys ``ports``, ``interval``, ``sweep_tabs``, ``countdown``,
-    ``max_defer``, ``ignore_user_questions`` (or ``None`` if no plist is
+    ``resume_delay``, ``ignore_user_questions`` (or ``None`` if no plist is
     installed / can't be parsed).
     """
     p = launchd_plist_path()
@@ -96,7 +96,7 @@ def read_installed_args() -> dict | None:
         interval = 1.0
         sweep_tabs = False  # match the CLI default
         countdown = 0.0
-        max_defer = 0.0
+        resume_delay = 3.0
         ignore_user_questions = True
         answer_text_questions = True
         i = 0
@@ -123,9 +123,9 @@ def read_installed_args() -> dict | None:
                     pass
                 i += 2
                 continue
-            if a == "--max-defer" and i + 1 < len(args):
+            if a == "--resume-delay" and i + 1 < len(args):
                 try:
-                    max_defer = float(args[i + 1])
+                    resume_delay = float(args[i + 1])
                 except ValueError:
                     pass
                 i += 2
@@ -150,7 +150,7 @@ def read_installed_args() -> dict | None:
             "interval": interval,
             "sweep_tabs": sweep_tabs,
             "countdown": countdown,
-            "max_defer": max_defer,
+            "resume_delay": resume_delay,
             "ignore_user_questions": ignore_user_questions,
             "answer_text_questions": answer_text_questions,
         }
@@ -163,7 +163,7 @@ def _watch_args(
     interval: float,
     sweep_tabs: bool,
     countdown: float,
-    max_defer: float,
+    resume_delay: float,
     ignore_user_questions: bool,
     answer_text_questions: bool = True,
 ) -> list[str]:
@@ -173,7 +173,7 @@ def _watch_args(
         args += ["--port", str(p)]
     args += ["--interval", str(interval)]
     args.append("--sweep-tabs" if sweep_tabs else "--no-sweep-tabs")
-    args += ["--countdown", str(countdown), "--max-defer", str(max_defer)]
+    args += ["--countdown", str(countdown), "--resume-delay", str(resume_delay)]
     args.append("--ignore-user-questions" if ignore_user_questions else "--no-ignore-user-questions")
     args.append("--answer-text-questions" if answer_text_questions else "--no-answer-text-questions")
     return args
@@ -185,7 +185,7 @@ def launchd_plist(
     log_dir: Path,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 0,
+    resume_delay: float = 3,
     ignore_user_questions: bool = True,
     answer_text_questions: bool = True,
 ) -> str:
@@ -196,7 +196,9 @@ def launchd_plist(
     payload = {
         "Label": LABEL,
         "ProgramArguments": [exe]
-        + _watch_args(ports, interval, sweep_tabs, countdown, max_defer, ignore_user_questions, answer_text_questions),
+        + _watch_args(
+            ports, interval, sweep_tabs, countdown, resume_delay, ignore_user_questions, answer_text_questions
+        ),
         "EnvironmentVariables": {"PYTHONPATH": _src_dir()},
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -212,7 +214,7 @@ def launchd_install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 0,
+    resume_delay: float = 3,
     ignore_user_questions: bool = True,
     answer_text_questions: bool = True,
 ) -> None:
@@ -226,7 +228,7 @@ def launchd_install(
             log_dir,
             sweep_tabs=sweep_tabs,
             countdown=countdown,
-            max_defer=max_defer,
+            resume_delay=resume_delay,
             ignore_user_questions=ignore_user_questions,
             answer_text_questions=answer_text_questions,
         )
@@ -414,13 +416,15 @@ def systemd_unit(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 0,
+    resume_delay: float = 3,
     ignore_user_questions: bool = True,
     answer_text_questions: bool = True,
 ) -> str:
     exe = _yes2all_executable()
     src_dir = _src_dir()
-    args = _watch_args(ports, interval, sweep_tabs, countdown, max_defer, ignore_user_questions, answer_text_questions)
+    args = _watch_args(
+        ports, interval, sweep_tabs, countdown, resume_delay, ignore_user_questions, answer_text_questions
+    )
     # Quote the exe and env value: install paths may contain spaces (e.g. an
     # iCloud-synced checkout) and an unquoted systemd unit fails to parse.
     exec_start = " ".join([f'"{exe}"', *args])
@@ -444,7 +448,7 @@ def systemd_install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 0,
+    resume_delay: float = 3,
     ignore_user_questions: bool = True,
     answer_text_questions: bool = True,
 ) -> None:
@@ -456,7 +460,7 @@ def systemd_install(
             interval,
             sweep_tabs=sweep_tabs,
             countdown=countdown,
-            max_defer=max_defer,
+            resume_delay=resume_delay,
             ignore_user_questions=ignore_user_questions,
             answer_text_questions=answer_text_questions,
         )
@@ -503,7 +507,7 @@ def install(
     interval: float,
     sweep_tabs: bool = True,
     countdown: float = 0,
-    max_defer: float = 0,
+    resume_delay: float = 3,
     ignore_user_questions: bool = True,
     answer_text_questions: bool = True,
 ) -> None:
@@ -514,7 +518,7 @@ def install(
             interval,
             sweep_tabs=sweep_tabs,
             countdown=countdown,
-            max_defer=max_defer,
+            resume_delay=resume_delay,
             ignore_user_questions=ignore_user_questions,
             answer_text_questions=answer_text_questions,
         )
@@ -524,7 +528,7 @@ def install(
             interval,
             sweep_tabs=sweep_tabs,
             countdown=countdown,
-            max_defer=max_defer,
+            resume_delay=resume_delay,
             ignore_user_questions=ignore_user_questions,
             answer_text_questions=answer_text_questions,
         )

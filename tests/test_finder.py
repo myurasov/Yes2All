@@ -25,7 +25,7 @@ PREP_HANDLERS = {
 
 def _fully_prepped(js: str) -> str:
     """Apply every runtime substitution the CLI applies."""
-    js = finder.with_max_defer(js, 300)
+    js = finder.with_resume_delay(js, 3)
     js = finder.with_ignore_user_questions(js, True)
     js = js.replace("__COUNTDOWN_SECS__", "3.0")
     return js
@@ -40,7 +40,7 @@ def test_no_unexpanded_lib_tokens():
 def test_no_placeholders_after_prep():
     for name, js in PREP_HANDLERS.items():
         prepped = _fully_prepped(js)
-        for ph in ("__MAX_DEFER_MS__", "__Y2A_IGNORE_USER_QUESTIONS__", "__COUNTDOWN_SECS__"):
+        for ph in ("__RESUME_MS__", "__Y2A_IGNORE_USER_QUESTIONS__", "__COUNTDOWN_SECS__"):
             assert ph not in prepped, f"{name} leaves {ph} unsubstituted"
 
 
@@ -74,22 +74,23 @@ def test_iframe_handlers_have_typing_guard():
         assert "__y2aDocTyping" in js, f"{name} missing iframe typing guard"
         assert "hasFocus" in js, f"{name} typing guard is not focus-aware"
         assert "shouldDeferForTyping()" in js, f"{name} never consults the defer guard"
-        assert "__MAX_DEFER_MS__" in js, f"{name} lost the max-defer placeholder"
+        assert "__RESUME_MS__" in js, f"{name} lost the resume-delay placeholder"
+        assert "data-y2a-last-key" in js, f"{name} missing the keystroke hook"
 
 
 def test_page_handlers_report_typing():
     for name in ("FIND_APPROVAL_BUTTONS_JS", "COUNTDOWN_BADGE_JS", "SWEEP_TABS_AND_CLICK_JS"):
-        assert "typing: userIsTyping()" in PREP_HANDLERS[name], f"{name} does not report typing state"
+        assert "typing: shouldDeferForTyping()" in PREP_HANDLERS[name], f"{name} does not report typing state"
 
 
 def test_text_confirm_has_typing_guard():
     assert "shouldDeferForTyping" in finder.DETECT_CHAT_TEXT_CONFIRM_JS
-    assert "__MAX_DEFER_MS__" in finder.DETECT_CHAT_TEXT_CONFIRM_JS
+    assert "__RESUME_MS__" in finder.DETECT_CHAT_TEXT_CONFIRM_JS
 
 
-def test_max_defer_zero_disables():
-    js = finder.with_max_defer(finder.CLICK_CHAT_QUESTION_JS, 0)
-    assert "const __Y2A_MAX_DEFER_MS = 0;" in js
+def test_resume_delay_zero_disables():
+    js = finder.with_resume_delay(finder.CLICK_CHAT_QUESTION_JS, 0)
+    assert "const __Y2A_RESUME_MS = 0;" in js
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

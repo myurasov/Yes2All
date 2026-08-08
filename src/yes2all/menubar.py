@@ -169,7 +169,7 @@ class Yes2AllApp(rumps.App):
         self.interval: float = cfg.get("interval", 1)
         self.sweep_tabs: bool = cfg.get("sweep_tabs", False)
         self.countdown: float = cfg.get("countdown", 0)
-        self.max_defer: float = cfg.get("max_defer", 0)
+        self.resume_delay: float = cfg.get("resume_delay", 3)
         self.ignore_user_questions: bool = cfg.get("ignore_user_questions", True)
         self.answer_text_questions: bool = cfg.get("answer_text_questions", True)
 
@@ -210,7 +210,7 @@ class Yes2AllApp(rumps.App):
         ports_menu.add(rumps.MenuItem("Reset Counters", callback=self.on_reset_counters))
         self.interval_item = rumps.MenuItem(self._interval_title(), callback=self.on_set_interval)
         self.countdown_item = rumps.MenuItem(self._countdown_title(), callback=self.on_set_countdown)
-        self.max_defer_item = rumps.MenuItem(self._max_defer_title(), callback=self.on_set_max_defer)
+        self.resume_delay_item = rumps.MenuItem(self._resume_delay_title(), callback=self.on_set_resume_delay)
 
         # App launchers — configurable list of editor apps + debug ports.
         self.apps: list[dict] = cfg.get("apps") or [
@@ -234,7 +234,7 @@ class Yes2AllApp(rumps.App):
         settings_menu.add(self.interval_item)
         settings_menu.add(self.countdown_item)
         settings_menu.add(self.sweep_item)
-        settings_menu.add(self.max_defer_item)
+        settings_menu.add(self.resume_delay_item)
         settings_menu.add(self.iuq_item)
 
         self.menu = [
@@ -288,14 +288,14 @@ class Yes2AllApp(rumps.App):
             self.interval = cfg["interval"]
             self.sweep_tabs = cfg["sweep_tabs"]
             self.countdown = cfg.get("countdown", 0)
-            self.max_defer = cfg.get("max_defer", self.max_defer)
+            self.resume_delay = cfg.get("resume_delay", self.resume_delay)
             self.ignore_user_questions = cfg.get("ignore_user_questions", self.ignore_user_questions)
             self.answer_text_questions = cfg.get("answer_text_questions", self.answer_text_questions)
             self.sweep_item.state = 1 if self.sweep_tabs else 0
             self.iuq_item.state = 1 if self.ignore_user_questions else 0
             self.interval_item.title = self._interval_title()
             self.countdown_item.title = self._countdown_title()
-            self.max_defer_item.title = self._max_defer_title()
+            self.resume_delay_item.title = self._resume_delay_title()
         # Re-detect app on each known port and refresh checkbox label/state.
         known_ports_set = {p for p, _ in KNOWN_PORTS}
         for (prt, default_name), mi in zip(KNOWN_PORTS, [self.port_items[p] for p, _ in KNOWN_PORTS], strict=True):
@@ -342,7 +342,7 @@ class Yes2AllApp(rumps.App):
                         self.interval,
                         sweep_tabs=self.sweep_tabs,
                         countdown=self.countdown,
-                        max_defer=self.max_defer,
+                        resume_delay=self.resume_delay,
                         ignore_user_questions=self.ignore_user_questions,
                         answer_text_questions=self.answer_text_questions,
                     )
@@ -386,7 +386,7 @@ class Yes2AllApp(rumps.App):
                 self.interval,
                 sweep_tabs=self.sweep_tabs,
                 countdown=self.countdown,
-                max_defer=self.max_defer,
+                resume_delay=self.resume_delay,
                 ignore_user_questions=self.ignore_user_questions,
                 answer_text_questions=self.answer_text_questions,
             )
@@ -450,10 +450,10 @@ class Yes2AllApp(rumps.App):
             return f"Countdown: {self.countdown:.0f}s\u2026"
         return "Countdown: off\u2026"
 
-    def _max_defer_title(self) -> str:
-        if self.max_defer > 0:
-            return f"Max Typing Defer: {self.max_defer:.0f}s\u2026"
-        return "Max Typing Defer: off\u2026"
+    def _resume_delay_title(self) -> str:
+        if self.resume_delay > 0:
+            return f"Typing Resume Delay: {self.resume_delay:.0f}s\u2026"
+        return "Typing Resume Delay: off\u2026"
 
     def _save_config(self) -> None:
         write_config(
@@ -462,7 +462,7 @@ class Yes2AllApp(rumps.App):
                 "interval": self.interval,
                 "sweep_tabs": self.sweep_tabs,
                 "countdown": self.countdown,
-                "max_defer": self.max_defer,
+                "resume_delay": self.resume_delay,
                 "ignore_user_questions": self.ignore_user_questions,
                 "answer_text_questions": self.answer_text_questions,
                 "apps": self.apps,
@@ -580,7 +580,7 @@ class Yes2AllApp(rumps.App):
                 self.interval,
                 sweep_tabs=self.sweep_tabs,
                 countdown=self.countdown,
-                max_defer=self.max_defer,
+                resume_delay=self.resume_delay,
                 ignore_user_questions=self.ignore_user_questions,
                 answer_text_questions=self.answer_text_questions,
             )
@@ -689,15 +689,17 @@ class Yes2AllApp(rumps.App):
         if self._reinstall_if_loaded():
             rumps.notification("Yes2All", "Countdown updated", self._countdown_title())
 
-    def on_set_max_defer(self, _: object) -> None:
+    def on_set_resume_delay(self, _: object) -> None:
         win = rumps.Window(
-            title="Set Max Typing Defer",
+            title="Set Typing Resume Delay",
             message=(
-                "Maximum seconds to defer auto-clicks while you have focus in a chat input.\n"
-                "After this many seconds the click fires even if you're still typing.\n"
-                "Set to 0 to disable deferring (always click immediately)."
+                "Approvals pause while you type in a chat input and resume this many\n"
+                "seconds after your last keystroke.\n"
+                "Set to 0 to disable pausing (always click immediately)."
             ),
-            default_text=str(int(self.max_defer) if self.max_defer == int(self.max_defer) else self.max_defer),
+            default_text=str(
+                int(self.resume_delay) if self.resume_delay == int(self.resume_delay) else self.resume_delay
+            ),
             ok="Apply",
             cancel="Cancel",
             dimensions=(120, 22),
@@ -711,13 +713,13 @@ class Yes2AllApp(rumps.App):
             if val < 0:
                 raise ValueError
         except ValueError:
-            rumps.alert("Invalid Max Defer", "Enter a non-negative number of seconds (0 disables).")
+            rumps.alert("Invalid Resume Delay", "Enter a non-negative number of seconds (0 disables).")
             return
-        self.max_defer = val
-        self.max_defer_item.title = self._max_defer_title()
+        self.resume_delay = val
+        self.resume_delay_item.title = self._resume_delay_title()
         self._save_config()
         if self._reinstall_if_loaded():
-            rumps.notification("Yes2All", "Max Typing Defer updated", self._max_defer_title())
+            rumps.notification("Yes2All", "Typing Resume Delay updated", self._resume_delay_title())
 
     def on_about(self, _: object) -> None:
         try:
@@ -735,7 +737,7 @@ class Yes2AllApp(rumps.App):
             f"Ports:   {ports_str}\n"
             f"Interval: {self.interval}s\n"
             f"Countdown: {self.countdown:.0f}s\n"
-            f"Max typing defer: {self.max_defer:.0f}s\n"
+            f"Typing resume delay: {self.resume_delay:.0f}s\n"
             f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n"
             f"Ignore user questions: {'on' if self.ignore_user_questions else 'off'}\n\n"
             f"© Mikhail Yurasov <me@yurasov.me>\n"
