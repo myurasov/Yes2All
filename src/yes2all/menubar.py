@@ -38,7 +38,8 @@ ICON_LIGHT = str(_ASSETS / "icon-light@2x.png")  # white check, for Dark theme
 ICON_OFF_DARK = str(_ASSETS / "icon-off-dark@2x.png")
 ICON_OFF_LIGHT = str(_ASSETS / "icon-off-light@2x.png")
 ICON_FLASH = str(_ASSETS / "icon-flash@2x.png")  # brief green pulse on click
-ICON_DEFER = str(_ASSETS / "icon-defer@2x.png")  # sky blue while typing defers approvals
+ICON_DEFER_DARK = str(_ASSETS / "icon-defer-dark@2x.png")  # dim black, for Light theme
+ICON_DEFER_LIGHT = str(_ASSETS / "icon-defer-light@2x.png")  # dim white, for Dark theme
 ICON_LARGE_DARK = str(_ASSETS / "icon-large-dark.png")
 ICON_LARGE_LIGHT = str(_ASSETS / "icon-large-light.png")
 
@@ -68,8 +69,26 @@ def _menu_icon(loaded: bool) -> str:
     return ICON_DARK if loaded else ICON_OFF_DARK
 
 
+def _defer_icon() -> str:
+    """Semi-transparent variant of the normal glyph (typing defer)."""
+    return ICON_DEFER_LIGHT if _system_is_dark() else ICON_DEFER_DARK
+
+
+_THEME_TTL = 5.0
+_theme_cache: list = [0.0, False]  # [checked_at, is_dark]
+
+
 def _system_is_dark() -> bool:
-    """Return True if macOS is currently in Dark Mode."""
+    """Return True if macOS is currently in Dark Mode (cached ~5s)."""
+    now = time.monotonic()
+    if now - _theme_cache[0] < _THEME_TTL:
+        return _theme_cache[1]
+    _theme_cache[0] = now
+    _theme_cache[1] = _system_is_dark_uncached()
+    return _theme_cache[1]
+
+
+def _system_is_dark_uncached() -> bool:
     try:
         r = subprocess.run(
             ["defaults", "read", "-g", "AppleInterfaceStyle"],
@@ -272,9 +291,9 @@ class Yes2AllApp(rumps.App):
                 desired = ICON_FLASH
             else:
                 self._flash_until = 0.0
-                desired = ICON_DEFER if _state.read_defer() else _menu_icon(self._active)
+                desired = _defer_icon() if _state.read_defer() else _menu_icon(self._active)
         elif _state.read_defer():
-            desired = ICON_DEFER
+            desired = _defer_icon()
         else:
             desired = _menu_icon(self._active)
         if self.icon != desired:
