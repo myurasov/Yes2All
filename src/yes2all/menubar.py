@@ -484,8 +484,8 @@ class Yes2AllApp(rumps.App):
 
     def _resume_delay_title(self) -> str:
         if self.resume_delay > 0:
-            return f"Typing Resume Delay: {self.resume_delay:.0f}s\u2026"
-        return "Typing Resume Delay: off\u2026"
+            return f"Typing Delay: {self.resume_delay:.0f}s\u2026"
+        return "Typing Delay: off\u2026"
 
     def _save_config(self) -> None:
         write_config(
@@ -723,7 +723,7 @@ class Yes2AllApp(rumps.App):
 
     def on_set_resume_delay(self, _: object) -> None:
         win = rumps.Window(
-            title="Set Typing Resume Delay",
+            title="Set Typing Delay",
             message=(
                 "Approvals pause while you type in a chat input and resume this many\n"
                 "seconds after your last keystroke.\n"
@@ -751,7 +751,7 @@ class Yes2AllApp(rumps.App):
         self.resume_delay_item.title = self._resume_delay_title()
         self._save_config()
         if self._reinstall_if_loaded():
-            rumps.notification("Yes2All", "Typing Resume Delay updated", self._resume_delay_title())
+            rumps.notification("Yes2All", "Typing Delay updated", self._resume_delay_title())
 
     def on_about(self, _: object) -> None:
         # Use the package's own __version__: dist metadata can be stale when
@@ -767,7 +767,7 @@ class Yes2AllApp(rumps.App):
             f"Ports:   {ports_str}\n"
             f"Interval: {self.interval}s\n"
             f"Countdown: {self.countdown:.0f}s\n"
-            f"Typing resume delay: {self.resume_delay:.0f}s\n"
+            f"Typing delay: {self.resume_delay:.0f}s\n"
             f"Sweep tabs: {'on' if self.sweep_tabs else 'off'}\n"
             f"Ignore user questions: {'on' if self.ignore_user_questions else 'off'}\n\n"
             f"© Mikhail Yurasov <me@yurasov.me>\n"
