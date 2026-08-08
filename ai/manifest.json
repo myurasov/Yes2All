@@ -1,0 +1,29 @@
+{
+  "_rev": 2,
+  "_comment": "Solaris project manifest. Versions live here (no .version files). Standalone collaborators: you may edit project.workspaces and plugins[]; the revisions map is Solaris sync metadata - leave it as-is (merge conflicts in it: take either side). No host/deploy/secret specifics - those live in ai/.memory/. plugins[] entries are {name, version} for copied plugins, {name, \"mode\": \"link\"} (no version - always live) for linked ones.",
+  "schema_version": 1,
+  "project": {
+    "name": "Yes2All",
+    "slug": "yes2all",
+    "type": "python-cli",
+    "mode": "embedded"
+  },
+  "framework_version": "0.22.3",
+  "plugins": [],
+  "revisions": {
+    "AGENTS.md": {
+      "rev": 13,
+      "hash": "ee9245b305498441ec29b0aee9d34656b3e0dd2b62d6d97060eb2dbf2aece0b1"
+    },
+    "ai/engineer.agent.md": {
+      "rev": 26,
+      "hash": "ad3d85344db527d2c64d8614306bc8b1035317359e0cc057a33a3781fcc90ea5"
+    }
+  },
+  "created": "2026-08-08",
+  "info": {
+    "upstream": "github.com/myurasov/Yes2All",
+    "imported_from": "~/Library/Mobile Documents/com~apple~CloudDocs/Projects/Yes2All (original kept in place under its own name; .git preserved here). Imported local-mode, converted same-day to embedded/flat: repo root == slug dir, no source/.",
+    "derived_from": "the project's prior bespoke ai/ setup (ai-coder.agent.md, ai-coder.instructions.md, spec.txt) + root AGENTS.md"
+  }
+}

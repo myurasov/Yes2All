@@ -8,3 +8,6 @@ build/
 .DS_Store
 .mypy_cache/
 __*
+ai/.memory/
+.mcp.json
+.cursor/
