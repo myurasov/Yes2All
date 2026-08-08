@@ -62,7 +62,8 @@ def probe(
         if not pages:
             print("No page targets found.")
             return
-        js = CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS
+        # Debug command: no typing-deferral (max_defer 0 = always report/click).
+        js = with_max_defer(CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS, 0)
         total = 0
         for p in pages:
             print(f"\n[page] {p.title}")
@@ -152,6 +153,14 @@ def watch(
             "Tool-approval prompts are still auto-approved.",
         ),
     ] = True,
+    answer_text_questions: Annotated[
+        bool,
+        typer.Option(
+            "--answer-text-questions/--no-answer-text-questions",
+            help="Auto-type 'Yes' to plain-text confirmation questions in chat "
+            "(e.g. 'shall I proceed?'). Disable to leave text questions to the user.",
+        ),
+    ] = True,
 ) -> None:
     """Poll page targets and auto-click approval buttons as they appear."""
     use_countdown = countdown > 0
@@ -161,11 +170,14 @@ def watch(
         """Apply the max-defer and ignore-user-questions substitutions."""
         return with_ignore_user_questions(with_max_defer(js, max_defer), iuq)
 
+    # A tab sweep legitimately runs ~1.5s per inactive chat tab; give it a
+    # far larger CDP deadline than single-shot handlers.
+    eval_timeout = 60.0 if sweep_tabs else 15.0
     js = with_max_defer(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, max_defer)
     js_cd = _prep(countdown_js(countdown)) if use_countdown else ""
     js_cd_codex = countdown_codex_js(countdown) if use_countdown else ""
     js_cd_claude = with_ignore_user_questions(countdown_claude_js(countdown), iuq) if use_countdown else ""
-    js_text_confirm = detect_chat_text_confirm_js(countdown)
+    js_text_confirm = with_max_defer(detect_chat_text_confirm_js(countdown), max_defer)
     js_chat_question = _prep(CLICK_CHAT_QUESTION_JS)
     js_chat_confirmation = with_max_defer(CLICK_CHAT_CONFIRMATION_JS, max_defer)
     js_claude = with_ignore_user_questions(CLICK_CLAUDE_PROMPT_JS, iuq)
@@ -210,16 +222,23 @@ def watch(
         print(
             f"watching ports {ports} every {interval}s "
             f"(once={once}, sweep_tabs={sweep_tabs}, countdown={countdown}s, max_defer={max_defer}s, "
-            f"ignore_user_questions={iuq}) ...",
+            f"ignore_user_questions={iuq}, answer_text_questions={answer_text_questions}) ...",
             flush=True,
         )
+        down_ports: set[int] = set()
         while True:
             for prt in ports:
                 try:
                     pages = await list_pages(port=prt)
                 except Exception as e:
-                    print(f"  [port {prt}] list_pages error: {e}", flush=True)
+                    # Log only the down/up transitions, not every tick.
+                    if prt not in down_ports:
+                        down_ports.add(prt)
+                        print(f"  [port {prt}] unreachable: {e}", flush=True)
                     continue
+                if prt in down_ports:
+                    down_ports.discard(prt)
+                    print(f"  [port {prt}] reachable again", flush=True)
                 for p in pages:
                     if use_countdown:
                         # Countdown mode: single JS handles detect + badge + click.
@@ -235,7 +254,6 @@ def watch(
                             data_cd = {}
                         _log_skipped(f"{prt}/{p.title}", data_cd, "carousel")
                         cd_n = int(data_cd.get("count", 0) or 0)
-                        cd_pending = int(data_cd.get("pending", 0) or 0)
                         if cd_n:
                             ts = time.strftime("%H:%M:%S")
                             for r in data_cd.get("clicked", []):
@@ -248,17 +266,18 @@ def watch(
                                 return
 
                     # --- Text-based confirmation questions (both modes) ---
-                    tc_n = await _handle_text_confirm(p, prt, js_text_confirm)
-                    if tc_n:
-                        _state.add_clicks(prt, tc_n)
-                        if once:
-                            return
+                    if answer_text_questions:
+                        tc_n = await _handle_text_confirm(p, prt, js_text_confirm)
+                        if tc_n:
+                            _state.add_clicks(prt, tc_n)
+                            if once:
+                                return
 
                     if not use_countdown:
                         # Instant mode: existing handlers.
                         try:
                             async with CDPSession(p.ws_url) as s:
-                                raw = await s.evaluate(js)
+                                raw = await s.evaluate(js, timeout=eval_timeout)
                                 raw_cq = await s.evaluate(js_chat_question)
                                 raw_cc = await s.evaluate(js_chat_confirmation)
                         except Exception as e:
@@ -311,13 +330,27 @@ def watch(
                 for t in all_targets:
                     if t.type != "iframe" or not t.ws_url:
                         continue
-                    # Run Codex handler.
+                    # Agent prompts live in VS Code webviews; skip unrelated
+                    # iframes rather than opening a WebSocket to each.
+                    if "vscode-webview://" not in f"{t.url} {t.title}":
+                        continue
+                    # One session per webview; both handlers evaluated on it.
                     codex_js = js_cd_codex if use_countdown else CLICK_CODEX_PROMPT_JS
+                    claude_js = js_cd_claude if use_countdown else js_claude
+                    raw_cx: object = "{}"
+                    raw_cl: object = "{}"
                     try:
                         async with CDPSession(t.ws_url) as s:
-                            raw_cx = await s.evaluate(codex_js)
+                            try:
+                                raw_cx = await s.evaluate(codex_js)
+                            except Exception:
+                                raw_cx = "{}"
+                            try:
+                                raw_cl = await s.evaluate(claude_js)
+                            except Exception:
+                                raw_cl = "{}"
                     except Exception:
-                        raw_cx = "{}"
+                        pass
                     try:
                         data_cx = json.loads(raw_cx) if isinstance(raw_cx, str) else raw_cx
                     except Exception:
@@ -335,13 +368,6 @@ def watch(
                         _state.add_clicks(prt, cx_n)
                         if once:
                             return
-                    # Run Claude handler.
-                    claude_js = js_cd_claude if use_countdown else js_claude
-                    try:
-                        async with CDPSession(t.ws_url) as s:
-                            raw_cl = await s.evaluate(claude_js)
-                    except Exception:
-                        raw_cl = "{}"
                     try:
                         data_cl = json.loads(raw_cl) if isinstance(raw_cl, str) else raw_cl
                     except Exception:
@@ -397,6 +423,13 @@ def service_install(
             help="Skip auto-answering questions the agent asks the user (tool approvals still auto-approved).",
         ),
     ] = True,
+    answer_text_questions: Annotated[
+        bool,
+        typer.Option(
+            "--answer-text-questions/--no-answer-text-questions",
+            help="Auto-type 'Yes' to plain-text confirmation questions in chat.",
+        ),
+    ] = True,
 ) -> None:
     """Install + start Yes2All as a background service (launchd / systemd --user)."""
     svc.install(
@@ -406,6 +439,7 @@ def service_install(
         countdown=countdown,
         max_defer=max_defer,
         ignore_user_questions=ignore_user_questions,
+        answer_text_questions=answer_text_questions,
     )
 
 
