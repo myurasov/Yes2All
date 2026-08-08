@@ -89,6 +89,13 @@ KNOWN_PORTS: list[tuple[int, str]] = [
 ]
 
 
+# _detect_app blocks on an HTTP timeout and runs on the rumps main loop —
+# cache results so offline ports (0.5s timeout each) don't stall the UI on
+# every 3s status tick.
+_DETECT_TTL = 15.0
+_detect_cache: dict[int, tuple[float, str | None]] = {}
+
+
 def _detect_app(port: int) -> str | None:
     """Hit `/json/version` on the given CDP port and return a friendly app name.
 
@@ -96,7 +103,18 @@ def _detect_app(port: int) -> str | None:
     Note: Electron-based apps (Cursor, VS Code) both report ``Browser: Chrome/...``;
     the only reliable discriminator is the ``User-Agent`` token (``Cursor/x.y.z``
     or ``Code/x.y.z``).
+    Results are cached for ``_DETECT_TTL`` seconds (see above).
     """
+    now = time.monotonic()
+    hit = _detect_cache.get(port)
+    if hit and now - hit[0] < _DETECT_TTL:
+        return hit[1]
+    name = _detect_app_uncached(port)
+    _detect_cache[port] = (now, name)
+    return name
+
+
+def _detect_app_uncached(port: int) -> str | None:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=0.5) as r:
             data = json.loads(r.read().decode())
@@ -149,10 +167,11 @@ class Yes2AllApp(rumps.App):
             cfg.update(plist_cfg)
         self.ports: list[int] = cfg.get("ports") or [9222, 9333]
         self.interval: float = cfg.get("interval", 1)
-        self.sweep_tabs: bool = cfg.get("sweep_tabs", True)
+        self.sweep_tabs: bool = cfg.get("sweep_tabs", False)
         self.countdown: float = cfg.get("countdown", 0)
         self.max_defer: float = cfg.get("max_defer", 0)
         self.ignore_user_questions: bool = cfg.get("ignore_user_questions", True)
+        self.answer_text_questions: bool = cfg.get("answer_text_questions", True)
 
         self.toggle_item = rumps.MenuItem("Start", callback=self.on_toggle)
         self.sweep_item = rumps.MenuItem("Cycle Cursor Tabs", callback=self.on_toggle_sweep)
@@ -271,6 +290,7 @@ class Yes2AllApp(rumps.App):
             self.countdown = cfg.get("countdown", 0)
             self.max_defer = cfg.get("max_defer", self.max_defer)
             self.ignore_user_questions = cfg.get("ignore_user_questions", self.ignore_user_questions)
+            self.answer_text_questions = cfg.get("answer_text_questions", self.answer_text_questions)
             self.sweep_item.state = 1 if self.sweep_tabs else 0
             self.iuq_item.state = 1 if self.ignore_user_questions else 0
             self.interval_item.title = self._interval_title()
@@ -324,6 +344,7 @@ class Yes2AllApp(rumps.App):
                         countdown=self.countdown,
                         max_defer=self.max_defer,
                         ignore_user_questions=self.ignore_user_questions,
+                        answer_text_questions=self.answer_text_questions,
                     )
                 except Exception as e:  # noqa: BLE001
                     rumps.notification("Yes2All", "Reinstall failed", str(e))
@@ -367,6 +388,7 @@ class Yes2AllApp(rumps.App):
                 countdown=self.countdown,
                 max_defer=self.max_defer,
                 ignore_user_questions=self.ignore_user_questions,
+                answer_text_questions=self.answer_text_questions,
             )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Start failed", str(e))
@@ -400,21 +422,7 @@ class Yes2AllApp(rumps.App):
         self.sweep_tabs = not self.sweep_tabs
         item.state = 1 if self.sweep_tabs else 0
         self._save_config()
-        if _is_loaded():
-            # Apply by reinstalling.
-            try:
-                svc.uninstall()
-                svc.install(
-                    self.ports,
-                    self.interval,
-                    sweep_tabs=self.sweep_tabs,
-                    countdown=self.countdown,
-                    max_defer=self.max_defer,
-                    ignore_user_questions=self.ignore_user_questions,
-                )
-            except Exception as e:  # noqa: BLE001
-                rumps.notification("Yes2All", "Reinstall failed", str(e))
-                return
+        if self._reinstall_if_loaded():
             self._refresh_status()
 
     def on_toggle_iuq(self, item: rumps.MenuItem) -> None:
@@ -456,6 +464,7 @@ class Yes2AllApp(rumps.App):
                 "countdown": self.countdown,
                 "max_defer": self.max_defer,
                 "ignore_user_questions": self.ignore_user_questions,
+                "answer_text_questions": self.answer_text_questions,
                 "apps": self.apps,
             }
         )
@@ -573,6 +582,7 @@ class Yes2AllApp(rumps.App):
                 countdown=self.countdown,
                 max_defer=self.max_defer,
                 ignore_user_questions=self.ignore_user_questions,
+                answer_text_questions=self.answer_text_questions,
             )
         except Exception as e:  # noqa: BLE001
             rumps.notification("Yes2All", "Reinstall failed", str(e))
