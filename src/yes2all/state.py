@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -55,6 +56,40 @@ def add_clicks(port: int, n: int) -> None:
     counts = read_counts()
     counts[port] = counts.get(port, 0) + n
     write_counts(counts)
+
+
+# ----- typing-defer state (watcher -> menubar) ---------------------------------
+
+DEFER_PATH = _data_dir() / "defer.json"
+
+# How stale the watcher's defer stamp may be before the menubar ignores it —
+# protects against a watcher that died (or was killed) mid-defer.
+DEFER_MAX_AGE = 5.0
+
+
+def write_defer(ports: list[int]) -> None:
+    """Record which ports are currently deferring approvals (typing pause).
+
+    The watcher calls this on every defer transition and re-stamps it each
+    poll tick while deferring, so readers can treat a stale stamp as inactive.
+    """
+    DEFER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DEFER_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"ports": sorted(ports), "ts": time.time()}))
+    os.replace(tmp, DEFER_PATH)
+
+
+def read_defer(max_age: float = DEFER_MAX_AGE) -> bool:
+    """Return True if the watcher is currently deferring approvals for typing."""
+    try:
+        data = json.loads(DEFER_PATH.read_text())
+    except (FileNotFoundError, ValueError, OSError):
+        return False
+    try:
+        fresh = (time.time() - float(data.get("ts", 0))) < max_age
+    except (TypeError, ValueError):
+        return False
+    return fresh and bool(data.get("ports"))
 
 
 # ----- menubar config persistence ---------------------------------------------

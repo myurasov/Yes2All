@@ -72,9 +72,7 @@ async def main() -> int:
 
         click_raw = await s.evaluate(CLICK_FIRST_APPROVAL_JS)
         click_data = json.loads(click_raw) if isinstance(click_raw, str) else click_raw
-        print(
-            f"click result: count={click_data.get('count')} buttons={click_data.get('buttons')}"
-        )
+        print(f"click result: count={click_data.get('count')} buttons={click_data.get('buttons')}")
 
         # Give the click handler a moment to run.
         await asyncio.sleep(0.1)

@@ -44,6 +44,26 @@ def test_config_defaults_and_merge(tmp_path, monkeypatch):
     assert cfg2["countdown"] == 3
 
 
+def test_defer_roundtrip_and_staleness(tmp_path, monkeypatch):
+    monkeypatch.setattr(state, "DEFER_PATH", tmp_path / "defer.json")
+    assert state.read_defer() is False  # no file yet
+    state.write_defer([9222])
+    assert state.read_defer() is True
+    state.write_defer([])
+    assert state.read_defer() is False  # empty port list = not deferring
+    state.write_defer([9222, 9333])
+    assert state.read_defer(max_age=0.0) is False  # stale stamp ignored
+
+
+def test_defer_corrupt_file(tmp_path, monkeypatch):
+    p = tmp_path / "defer.json"
+    monkeypatch.setattr(state, "DEFER_PATH", p)
+    p.write_text("{bad")
+    assert state.read_defer() is False
+    p.write_text('{"ports": [9222], "ts": "junk"}')
+    assert state.read_defer() is False
+
+
 def test_config_corrupt_file(tmp_path, monkeypatch):
     p = tmp_path / "config.json"
     monkeypatch.setattr(state, "CONFIG_PATH", p)

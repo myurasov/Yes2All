@@ -38,6 +38,7 @@ ICON_LIGHT = str(_ASSETS / "icon-light@2x.png")  # white check, for Dark theme
 ICON_OFF_DARK = str(_ASSETS / "icon-off-dark@2x.png")
 ICON_OFF_LIGHT = str(_ASSETS / "icon-off-light@2x.png")
 ICON_FLASH = str(_ASSETS / "icon-flash@2x.png")  # brief green pulse on click
+ICON_DEFER = str(_ASSETS / "icon-defer@2x.png")  # sky blue while typing defers approvals
 ICON_LARGE_DARK = str(_ASSETS / "icon-large-dark.png")
 ICON_LARGE_LIGHT = str(_ASSETS / "icon-large-light.png")
 
@@ -183,6 +184,9 @@ class Yes2AllApp(rumps.App):
         # menubar icon to a green check.
         self._flash_until: float = 0.0
         self._last_total: int = sum(_state.read_counts().values())
+        # Cached by _refresh_status (3s); the 0.25s icon timer must not shell
+        # out to launchctl on every tick.
+        self._active: bool = _is_loaded()
 
         # One checkbox per known port, grouped under a "Ports" submenu.
         # Label is detected live from each port's /json/version endpoint.
@@ -262,17 +266,26 @@ class Yes2AllApp(rumps.App):
         if total > self._last_total:
             self._last_total = total
             self._flash_until = now + FLASH_DURATION
-            self.icon = ICON_FLASH
-            return
-        if self._flash_until and now >= self._flash_until:
-            self._flash_until = 0.0
-            self.icon = _menu_icon(_is_loaded())
+        # Priority: green click-flash > sky-blue typing-defer > normal state.
+        if self._flash_until:
+            if now < self._flash_until:
+                desired = ICON_FLASH
+            else:
+                self._flash_until = 0.0
+                desired = ICON_DEFER if _state.read_defer() else _menu_icon(self._active)
+        elif _state.read_defer():
+            desired = ICON_DEFER
+        else:
+            desired = _menu_icon(self._active)
+        if self.icon != desired:
+            self.icon = desired
 
     def _refresh_status(self) -> None:
         loaded = _is_loaded()
         paused = loaded and svc.launchd_is_paused()
         active = loaded and not paused
-        if not self._flash_until:
+        self._active = active
+        if not self._flash_until and not _state.read_defer():
             self.icon = _menu_icon(active)
         if not loaded:
             self.toggle_item.title = "Start"

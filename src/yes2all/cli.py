@@ -371,10 +371,14 @@ def watch(
                     if prt not in deferring:
                         deferring.add(prt)
                         print(f"  [port {prt}] deferring webview approvals while typing", flush=True)
+                    # Re-stamp every tick so readers (menubar icon) can treat a
+                    # stale stamp as inactive if the watcher dies mid-defer.
+                    _state.write_defer(sorted(deferring))
                     continue
                 if prt in deferring:
                     deferring.discard(prt)
                     print(f"  [port {prt}] typing ended, webview approvals resume", flush=True)
+                    _state.write_defer(sorted(deferring))
 
                 for t in webviews:
                     # One session per webview; both handlers evaluated on it.
