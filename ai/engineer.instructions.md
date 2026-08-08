@@ -119,6 +119,12 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 - **Codex (OpenAI) extension**: approval UI in a nested `#active-frame` iframe inside a webview - handler
   runs on **iframe** CDP targets. Radios `button[role=radio][type=submit]` with aria-label starting
   "Yes", then a "Submit" button. Claude webview prompts are handled the same way (iframe targets).
+- **One webview != one CDP target** (verified live 2026-08-08): the Claude Code panel surfaces as ~4
+  iframe targets sharing the same `vscode-webview://` origin, and the user's caret and a pending prompt
+  can sit in *different* frame documents. Any per-frame focus/typing logic must therefore aggregate
+  across all webview frames on the port (see `IFRAME_TYPING_PROBE_JS` + the cli-side skip); a guard
+  inside a single handler is not enough. `document.hasFocus()` is required before trusting
+  `activeElement` - it lingers after focus leaves a doc.
 
 ## Click Handlers (finder.py)
 
