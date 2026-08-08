@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 from dataclasses import dataclass
@@ -12,6 +13,11 @@ from typing import Any
 
 import httpx
 import websockets
+
+# Default deadline for a single CDP command round-trip. A suspended renderer
+# (App Nap, SIGSTOP'd editor, wedged webview) otherwise blocks recv() forever
+# and freezes the whole single-threaded watch loop across all ports.
+DEFAULT_TIMEOUT = 15.0
 
 
 @dataclass
@@ -49,7 +55,9 @@ class CDPSession:
 
     def __init__(self, ws_url: str):
         self.ws_url = ws_url
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        # Annotated Any: `websockets.WebSocketClientProtocol` is deprecated in
+        # websockets >= 14 and the client object type differs across majors.
+        self._ws: Any = None
         self._ids = itertools.count(1)
 
     async def __aenter__(self) -> "CDPSession":
@@ -62,21 +70,40 @@ class CDPSession:
             await self._ws.close()
             self._ws = None
 
-    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = DEFAULT_TIMEOUT,
+    ) -> dict[str, Any]:
         assert self._ws is not None, "session not opened"
         msg_id = next(self._ids)
         payload = {"id": msg_id, "method": method, "params": params or {}}
-        await self._ws.send(json.dumps(payload))
-        # Drain until we get the matching response. Ignore unrelated events.
-        while True:
-            raw = await self._ws.recv()
-            data = json.loads(raw)
-            if data.get("id") == msg_id:
-                if "error" in data:
-                    raise RuntimeError(f"CDP error for {method}: {data['error']}")
-                return data.get("result", {})
 
-    async def evaluate(self, expression: str, return_by_value: bool = True) -> Any:
+        async def _roundtrip() -> dict[str, Any]:
+            await self._ws.send(json.dumps(payload))
+            # Drain until we get the matching response. Ignore unrelated events.
+            while True:
+                raw = await self._ws.recv()
+                data = json.loads(raw)
+                if data.get("id") == msg_id:
+                    if "error" in data:
+                        raise RuntimeError(f"CDP error for {method}: {data['error']}")
+                    return data.get("result", {})
+
+        if timeout is None:
+            return await _roundtrip()
+        try:
+            return await asyncio.wait_for(_roundtrip(), timeout)
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"CDP {method} timed out after {timeout}s") from None
+
+    async def evaluate(
+        self,
+        expression: str,
+        return_by_value: bool = True,
+        timeout: float | None = DEFAULT_TIMEOUT,
+    ) -> Any:
         result = await self.send(
             "Runtime.evaluate",
             {
@@ -84,6 +111,7 @@ class CDPSession:
                 "returnByValue": return_by_value,
                 "awaitPromise": True,
             },
+            timeout=timeout,
         )
         ro = result.get("result", {})
         if ro.get("subtype") == "error":
