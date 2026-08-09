@@ -640,7 +640,15 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
   function firstLine(t) { return ((t || "").split(/\r?\n/)[0] || "").trim(); }
   const SUBMIT_POSITIVE = /^(yes|allow|approve|accept|confirm|ok)\b/i;
   function findSubmitApproval() {
-    for (const b of doc.querySelectorAll('button[type="submit"]')) {
+    // The affirmative is type=submit in the plain card but type=button in the
+    // split-button (dropdown) variant — scan submit buttons first, then the
+    // rest. SUBMIT_POSITIVE has no "run" verb, so the card's collapsible
+    // "Run <command>" header can never match.
+    const cands = [
+      ...doc.querySelectorAll('button[type="submit"]'),
+      ...doc.querySelectorAll('button:not([type="submit"])'),
+    ];
+    for (const b of cands) {
       const label = firstLine(b.innerText || b.textContent);
       if (!label || NEGATIVE.test(label)) continue;
       if (!SUBMIT_POSITIVE.test(label)) continue;
@@ -1346,7 +1354,15 @@ CLICK_CODEX_PROMPT_JS = r"""
   // collapsible header button whose text starts with "Run ..." and must never
   // be clicked.
   function findSubmitApproval() {
-    for (const b of doc.querySelectorAll('button[type="submit"]')) {
+    // The affirmative is type=submit in the plain card but type=button in the
+    // split-button (dropdown) variant — scan submit buttons first, then the
+    // rest. SUBMIT_POSITIVE has no "run" verb, so the card's collapsible
+    // "Run <command>" header can never match.
+    const cands = [
+      ...doc.querySelectorAll('button[type="submit"]'),
+      ...doc.querySelectorAll('button:not([type="submit"])'),
+    ];
+    for (const b of cands) {
       const label = firstLine(b.innerText || b.textContent);
       if (!label || NEGATIVE.test(label)) continue;
       if (!SUBMIT_POSITIVE.test(label)) continue;
