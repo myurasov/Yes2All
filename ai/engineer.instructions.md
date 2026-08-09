@@ -119,9 +119,11 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
 - **Codex (OpenAI) extension**: approval UI in a nested `#active-frame` iframe inside a webview - handler
   runs on **iframe** CDP targets. Two UI generations: (1) radios `button[role=radio][type=submit]` with
   aria-label starting "Yes" + a "Submit" button; (2) the 2026 "request card" (verified live in Cursor
-  2026-08-08): plain buttons where the affirmative is the only `button[type=submit]` ("Allow once ⏎"),
-  "Deny\nEscape" is a regular button, and a collapsible header button starts with "Run ..." - match
-  submit-type buttons ONLY (never text-match "Run" here). Claude webview prompts are handled the same
+  2026-08-08): plain buttons where the affirmative is "Allow once ⏎" -
+  `type=submit` in the plain card but **`type=button` in the split-button (dropdown) variant** -
+  "Deny\nEscape" is a regular button, and a collapsible header button starts with "Run ..." - so match
+  by the SUBMIT_POSITIVE verb set (which deliberately has no "run") across all buttons, submit-type
+  first. Claude webview prompts are handled the same
   way (iframe targets).
 - **One webview != one CDP target** (verified live 2026-08-08): the Claude Code panel surfaces as ~4
   iframe targets sharing the same `vscode-webview://` origin, and the user's caret and a pending prompt

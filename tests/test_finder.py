@@ -83,6 +83,7 @@ def test_codex_handlers_cover_both_ui_generations():
         js = PREP_HANDLERS[name]
         assert 'button[role="radio"]' in js, f"{name} lost the radio variant"
         assert 'button[type="submit"]' in js, f"{name} lost the request-card variant"
+        assert 'button:not([type="submit"])' in js, f"{name} lost the split-button (type=button) fallback"
         assert "SUBMIT_POSITIVE" in js, f"{name} clicks submit buttons without a positive-label check"
 
 
