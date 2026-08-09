@@ -88,7 +88,7 @@ uv run yes2all service install --port 9222 --port 9333 --interval 1 --no-sweep-t
 | VS Code Copilot Chat | Chat-question carousel | Selects the first affirmative option, or the first non-negative fallback, then submits |
 | VS Code Copilot Chat | Confirmation widget | Clicks the positive primary button and avoids `Skip` / secondary buttons |
 | VS Code Copilot Chat | Plain-text confirmation question | Types `Yes` and presses Enter when a matching yes/no question is waiting for input |
-| VS Code Codex | Webview iframe prompt | Selects the `Yes` radio option and submits |
+| Cursor / VS Code Codex | Webview iframe prompt | Older UI: selects the `Yes` radio and submits. Newer "request card" UI: clicks the affirmative submit button (`Allow once`), never `Deny` or the command header |
 | VS Code Claude Code | Webview iframe prompt | Handles direct numbered affirmative buttons and radio + submit variants |
 | Cursor / Claude / Codex | User-facing question (no Yes/Allow option) | Left untouched for you to answer while `--ignore-user-questions` is on (the default); logged as `SKIPPED user-question` |
 

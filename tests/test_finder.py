@@ -78,6 +78,14 @@ def test_iframe_handlers_have_typing_guard():
         assert "data-y2a-last-key" in js, f"{name} missing the keystroke hook"
 
 
+def test_codex_handlers_cover_both_ui_generations():
+    for name in ("CLICK_CODEX_PROMPT_JS", "COUNTDOWN_CODEX_BADGE_JS"):
+        js = PREP_HANDLERS[name]
+        assert 'button[role="radio"]' in js, f"{name} lost the radio variant"
+        assert 'button[type="submit"]' in js, f"{name} lost the request-card variant"
+        assert "SUBMIT_POSITIVE" in js, f"{name} clicks submit buttons without a positive-label check"
+
+
 def test_page_handlers_report_typing():
     for name in ("FIND_APPROVAL_BUTTONS_JS", "COUNTDOWN_BADGE_JS", "SWEEP_TABS_AND_CLICK_JS"):
         assert "typing: shouldDeferForTyping()" in PREP_HANDLERS[name], f"{name} does not report typing state"

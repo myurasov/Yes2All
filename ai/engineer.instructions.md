@@ -117,8 +117,12 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
   - Plain-text yes/no questions: last `.chat-markdown-part` ends with `?` and matches `CONFIRM_RE`;
     answer typed via CDP `Input.insertText` + Enter, scoped to the same chat widget.
 - **Codex (OpenAI) extension**: approval UI in a nested `#active-frame` iframe inside a webview - handler
-  runs on **iframe** CDP targets. Radios `button[role=radio][type=submit]` with aria-label starting
-  "Yes", then a "Submit" button. Claude webview prompts are handled the same way (iframe targets).
+  runs on **iframe** CDP targets. Two UI generations: (1) radios `button[role=radio][type=submit]` with
+  aria-label starting "Yes" + a "Submit" button; (2) the 2026 "request card" (verified live in Cursor
+  2026-08-08): plain buttons where the affirmative is the only `button[type=submit]` ("Allow once ⏎"),
+  "Deny\nEscape" is a regular button, and a collapsible header button starts with "Run ..." - match
+  submit-type buttons ONLY (never text-match "Run" here). Claude webview prompts are handled the same
+  way (iframe targets).
 - **One webview != one CDP target** (verified live 2026-08-08): the Claude Code panel surfaces as ~4
   iframe targets sharing the same `vscode-webview://` origin, and the user's caret and a pending prompt
   can sit in *different* frame documents. Any per-frame focus/typing logic must therefore aggregate

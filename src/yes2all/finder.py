@@ -637,9 +637,21 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
   const inner = document.querySelector('#active-frame');
   if (inner) { try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {} }
 
+  function firstLine(t) { return ((t || "").split(/\r?\n/)[0] || "").trim(); }
+  const SUBMIT_POSITIVE = /^(yes|allow|approve|accept|confirm|ok)\b/i;
+  function findSubmitApproval() {
+    for (const b of doc.querySelectorAll('button[type="submit"]')) {
+      const label = firstLine(b.innerText || b.textContent);
+      if (!label || NEGATIVE.test(label)) continue;
+      if (!SUBMIT_POSITIVE.test(label)) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1) continue;
+      return b;
+    }
+    return null;
+  }
+
   const radios = Array.from(doc.querySelectorAll('button[role="radio"]'));
-  if (radios.length === 0)
-    return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
 
   let chosen = null;
   for (const r of radios) {
@@ -647,6 +659,7 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
     if (NEGATIVE.test(label)) continue;
     if (POSITIVE.test(label)) { chosen = r; break; }
   }
+  if (!chosen) chosen = findSubmitApproval();
   if (!chosen)
     return JSON.stringify({url: location.href, count: 0, pending: 0, clicked: []});
 
@@ -674,16 +687,18 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
     badge.remove();
     chosen.removeAttribute(BADGE_ATTR);
     realClick(chosen);
-    const allButtons = Array.from(doc.querySelectorAll('button'));
-    for (const b of allButtons) {
-      if (/^submit\b/i.test((b.innerText || "").trim())) { realClick(b); break; }
+    if (chosen.getAttribute("role") === "radio") {
+      const allButtons = Array.from(doc.querySelectorAll('button'));
+      for (const b of allButtons) {
+        if (/^submit\b/i.test((b.innerText || "").trim())) { realClick(b); break; }
+      }
     }
-    const label = (chosen.getAttribute("aria-label") || "").trim().slice(0, 120);
+    const label = (chosen.getAttribute("aria-label") || firstLine(chosen.innerText) || "").trim().slice(0, 120);
     return JSON.stringify({url: location.href, count: 1, pending: 0, clicked: [{text: label}]});
   }
 
   badge.textContent = String(remaining);
-  const label = (chosen.getAttribute("aria-label") || "").trim().slice(0, 120);
+  const label = (chosen.getAttribute("aria-label") || firstLine(chosen.innerText) || "").trim().slice(0, 120);
   return JSON.stringify({url: location.href, count: 0, pending: 1, clicked: [], pendingDetails: [{text: label, remaining}]});
 })()
 """
@@ -1322,10 +1337,28 @@ CLICK_CODEX_PROMPT_JS = r"""
     try { if (inner.contentDocument) doc = inner.contentDocument; } catch(_) {}
   }
 
-  // Find radio-button options.
+  function firstLine(t) { return ((t || "").split(/\r?\n/)[0] || "").trim(); }
+  const SUBMIT_POSITIVE = /^(yes|allow|approve|accept|confirm|ok)\b/i;
+
+  // Variant 2 (Codex 2026 "request card", seen in Cursor): plain buttons, the
+  // affirmative is the only button[type=submit] ("Allow once ⏎"); "Deny" is a
+  // regular button. Match ONLY submit-type buttons — the card also has a
+  // collapsible header button whose text starts with "Run ..." and must never
+  // be clicked.
+  function findSubmitApproval() {
+    for (const b of doc.querySelectorAll('button[type="submit"]')) {
+      const label = firstLine(b.innerText || b.textContent);
+      if (!label || NEGATIVE.test(label)) continue;
+      if (!SUBMIT_POSITIVE.test(label)) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width <= 1 || r.height <= 1) continue;
+      return b;
+    }
+    return null;
+  }
+
+  // Variant 1: radio-button options.
   const radios = Array.from(doc.querySelectorAll('button[role="radio"]'));
-  if (radios.length === 0)
-    return JSON.stringify({url: location.href, count: 0, results: []});
 
   // Pick first positive option.
   let chosen = null;
@@ -1336,8 +1369,15 @@ CLICK_CODEX_PROMPT_JS = r"""
     if (NEGATIVE.test(label)) continue;
     if (POSITIVE.test(label)) { chosen = r; break; }
   }
-  if (!chosen)
+  if (!chosen) {
+    const btn = findSubmitApproval();
+    if (btn) {
+      const label = firstLine(btn.innerText || btn.textContent).slice(0, 120);
+      realClick(btn);
+      return JSON.stringify({url: location.href, count: 1, results: [{label, how: "submit-button", question: ""}]});
+    }
     return JSON.stringify({url: location.href, count: 0, results: []});
+  }
 
   const chosenLabel = (chosen.getAttribute("aria-label") || chosen.innerText || "").trim().slice(0, 120);
 
