@@ -85,6 +85,9 @@ def test_codex_handlers_cover_both_ui_generations():
         assert 'button[type="submit"]' in js, f"{name} lost the request-card variant"
         assert 'button:not([type="submit"])' in js, f"{name} lost the split-button (type=button) fallback"
         assert "SUBMIT_POSITIVE" in js, f"{name} clicks submit buttons without a positive-label check"
+        assert "hasNegativeSibling" in js, (
+            f"{name} lost the Deny-sibling pair requirement (clicks the 'Approve for me' mode selector)"
+        )
 
 
 def test_page_handlers_report_typing():

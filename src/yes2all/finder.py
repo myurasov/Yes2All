@@ -639,6 +639,21 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
 
   function firstLine(t) { return ((t || "").split(/\r?\n/)[0] || "").trim(); }
   const SUBMIT_POSITIVE = /^(yes|allow|approve|accept|confirm|ok)\b/i;
+  // A real request card pairs the affirmative with a negative button (Deny /
+  // Decline) in the same row. Standalone affirmative-labeled buttons like the
+  // composer's "Approve for me" mode selector have no such sibling and must
+  // never be clicked (clicking it toggles the approval-mode menu every tick).
+  function hasNegativeSibling(b) {
+    let cur = b.parentElement;
+    for (let i = 0; i < 3 && cur; i++) {
+      for (const o of cur.querySelectorAll("button")) {
+        if (o === b) continue;
+        if (NEGATIVE.test(firstLine(o.innerText || o.textContent))) return true;
+      }
+      cur = cur.parentElement;
+    }
+    return false;
+  }
   function findSubmitApproval() {
     // The affirmative is type=submit in the plain card but type=button in the
     // split-button (dropdown) variant — scan submit buttons first, then the
@@ -654,6 +669,7 @@ COUNTDOWN_CODEX_BADGE_JS = r"""
       if (!SUBMIT_POSITIVE.test(label)) continue;
       const r = b.getBoundingClientRect();
       if (r.width <= 1 || r.height <= 1) continue;
+      if (!hasNegativeSibling(b)) continue;
       return b;
     }
     return null;
@@ -1353,6 +1369,21 @@ CLICK_CODEX_PROMPT_JS = r"""
   // regular button. Match ONLY submit-type buttons — the card also has a
   // collapsible header button whose text starts with "Run ..." and must never
   // be clicked.
+  // A real request card pairs the affirmative with a negative button (Deny /
+  // Decline) in the same row. Standalone affirmative-labeled buttons like the
+  // composer's "Approve for me" mode selector have no such sibling and must
+  // never be clicked (clicking it toggles the approval-mode menu every tick).
+  function hasNegativeSibling(b) {
+    let cur = b.parentElement;
+    for (let i = 0; i < 3 && cur; i++) {
+      for (const o of cur.querySelectorAll("button")) {
+        if (o === b) continue;
+        if (NEGATIVE.test(firstLine(o.innerText || o.textContent))) return true;
+      }
+      cur = cur.parentElement;
+    }
+    return false;
+  }
   function findSubmitApproval() {
     // The affirmative is type=submit in the plain card but type=button in the
     // split-button (dropdown) variant — scan submit buttons first, then the
@@ -1368,6 +1399,7 @@ CLICK_CODEX_PROMPT_JS = r"""
       if (!SUBMIT_POSITIVE.test(label)) continue;
       const r = b.getBoundingClientRect();
       if (r.width <= 1 || r.height <= 1) continue;
+      if (!hasNegativeSibling(b)) continue;
       return b;
     }
     return null;

@@ -123,7 +123,9 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
   `type=submit` in the plain card but **`type=button` in the split-button (dropdown) variant** -
   "Deny\nEscape" is a regular button, and a collapsible header button starts with "Run ..." - so match
   by the SUBMIT_POSITIVE verb set (which deliberately has no "run") across all buttons, submit-type
-  first. Claude webview prompts are handled the same
+  first, AND require a negative-labeled sibling button (Deny/Decline) within 3 ancestor levels: the
+  composer's standalone "Approve for me" approval-mode selector also starts with "Approve" and clicking
+  it toggles that menu every tick (bogus-blink bug, fixed 2026-08-08 v1.5.2). Claude webview prompts are handled the same
   way (iframe targets).
 - **One webview != one CDP target** (verified live 2026-08-08): the Claude Code panel surfaces as ~4
   iframe targets sharing the same `vscode-webview://` origin, and the user's caret and a pending prompt
