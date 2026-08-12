@@ -334,6 +334,11 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     if (txt.length > 40) continue;
     const target = clickableAncestor(node);
     if (!target) continue;
+    // A collapsible section header is never an approval: newer Cursor renders
+    // collapsed "Run attempted" status headers whose inner span is just
+    // "Run", and clicking them toggles the collapse (visible as a bounce)
+    // while starving the real approval behind them.
+    if (target.closest && target.closest(".ui-collapsible-header")) continue;
     // Accept if this is a Cursor-specific approval button (verb varies),
     // otherwise require the visible text to pass the strict verb match.
     if (!isApprovalSpecific(target) && !strictVerbMatch(txt)) continue;
@@ -498,6 +503,8 @@ COUNTDOWN_BADGE_JS = r"""
     if (txt.length > 40) continue;
     const t = clickableAncestor(node);
     if (!t) continue;
+    // Never a collapse-toggle header - see FIND_APPROVAL_BUTTONS_JS.
+    if (t.closest && t.closest(".ui-collapsible-header")) continue;
     // Accept if this is a Cursor-specific approval button (verb varies per
     // tool: Run, Fetch, Read, ...), otherwise require a strict verb match.
     if (!isApprovalSpecific(t) && !strictVerbMatch(txt)) continue;
@@ -1362,6 +1369,8 @@ SWEEP_TABS_AND_CLICK_JS = r"""
       if (!txt || txt.length > 40) continue;
       const target = clickableAncestor(node);
       if (!target || !visible(target)) continue;
+      // Never a collapse-toggle header - see FIND_APPROVAL_BUTTONS_JS.
+      if (target.closest && target.closest(".ui-collapsible-header")) continue;
       // Cursor-specific approval class (verb varies: Run, Fetch, ...) OR strict verb match.
       if (!isApprovalSpecific(target) && !strictVerbMatch(txt)) continue;
       // Skip Cursor questionnaire (user-question) UI - see FIND_APPROVAL_BUTTONS_JS.

@@ -93,6 +93,18 @@ def test_cursor_finders_skip_questionnaire_ui():
         assert "__Y2A_IGNORE_USER_QUESTIONS__" in js or "IGNORE_USER_QUESTIONS" in js, f"{name} lacks the IUQ gate"
 
 
+def test_cursor_finders_skip_collapsible_headers():
+    """Collapsed 'Run attempted' status headers contain a bare 'Run' span; clicking
+    them toggles the collapse (bounce) and starves the real approval behind them."""
+    for name in (
+        "FIND_APPROVAL_BUTTONS_JS",
+        "CLICK_FIRST_APPROVAL_JS",
+        "COUNTDOWN_BADGE_JS",
+        "SWEEP_TABS_AND_CLICK_JS",
+    ):
+        assert "ui-collapsible-header" in PREP_HANDLERS[name], f"{name} can click collapse toggles"
+
+
 def test_questionnaire_auto_answer_handler():
     js = PREP_HANDLERS["CLICK_QUESTIONNAIRE_JS"]
     assert "IGNORE_USER_QUESTIONS" in js, "handler must no-op when ignore-user-questions is on"

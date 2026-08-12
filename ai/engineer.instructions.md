@@ -103,7 +103,10 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
     (`isApprovalSpecific()`); the strict verb whitelist is only the fallback for non-Cursor UIs.
   - Exclude `span.mcp-header-verb` (description text) and collapsed status headers like
     `Run MCP attempted` - `strictVerbMatch()` requires the first alpha run to be a verb and all
-    later runs <= 1 char.
+    later runs <= 1 char. The 2026-08 UI splits headers into lines (`Run` on its own span inside
+    `button.ui-collapsible-header`, defeating strictVerbMatch via the inner-span walk), so all page
+    finders also hard-skip anything inside `.ui-collapsible-header` (clicking one toggles the collapse -
+    seen as a 1/s bounce - and starves the real `ui-tool-approval-gate` Run button behind it).
   - **Questionnaire (native user-question) UI** (verified live 2026-08-09): container classes
     `composer-questionnaire-toolbar` under a `has-pending-questionnaire` ancestor; its "Continue ⏎"
     button carries `composer-run-button` classes, so it matches `isApprovalSpecific()` and, unless
