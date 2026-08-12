@@ -21,6 +21,7 @@ from .finder import (
     CLICK_CLAUDE_PROMPT_JS,
     CLICK_CODEX_PROMPT_JS,
     CLICK_FIRST_APPROVAL_JS,
+    CLICK_QUESTIONNAIRE_JS,
     FIND_APPROVAL_BUTTONS_JS,
     IFRAME_TYPING_PROBE_JS,
     SWEEP_TABS_AND_CLICK_JS,
@@ -190,6 +191,7 @@ def watch(
     js_chat_question = _prep(CLICK_CHAT_QUESTION_JS)
     js_chat_confirmation = with_resume_delay(CLICK_CHAT_CONFIRMATION_JS, resume_delay)
     js_claude = _prep(CLICK_CLAUDE_PROMPT_JS)
+    js_questionnaire = "" if iuq else _prep(CLICK_QUESTIONNAIRE_JS)
     ports = list(port) if port else [9222]
 
     def _log_skipped(p_label: str, data: dict, agent: str) -> None:
@@ -324,6 +326,27 @@ def watch(
                                     flush=True,
                                 )
                             _state.add_clicks(prt, cd_n)
+                            if once:
+                                return
+
+                    # --- Questionnaire auto-answer (only without ignore-user-questions) ---
+                    if js_questionnaire:
+                        try:
+                            async with CDPSession(p.ws_url) as s:
+                                raw_qn = await s.evaluate(js_questionnaire)
+                            data_qn = json.loads(raw_qn) if isinstance(raw_qn, str) else raw_qn
+                        except Exception:
+                            data_qn = {}
+                        qn_n = int(data_qn.get("count", 0) or 0)
+                        if qn_n:
+                            ts = time.strftime("%H:%M:%S")
+                            for r in data_qn.get("results", []):
+                                print(
+                                    f"[{ts}] QUESTIONNAIRE on '{prt}/{p.title[:40]}' "
+                                    f"question={r.get('question')!r} how={r.get('how')}",
+                                    flush=True,
+                                )
+                            _state.add_clicks(prt, qn_n)
                             if once:
                                 return
 

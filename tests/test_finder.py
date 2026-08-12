@@ -93,6 +93,20 @@ def test_cursor_finders_skip_questionnaire_ui():
         assert "__Y2A_IGNORE_USER_QUESTIONS__" in js or "IGNORE_USER_QUESTIONS" in js, f"{name} lacks the IUQ gate"
 
 
+def test_questionnaire_auto_answer_handler():
+    js = PREP_HANDLERS["CLICK_QUESTIONNAIRE_JS"]
+    assert "IGNORE_USER_QUESTIONS" in js, "handler must no-op when ignore-user-questions is on"
+    assert "composer-questionnaire-toolbar-option-freeform" in js, "lost the Other/freeform selector"
+    assert "composer-questionnaire-toolbar-freeform-input" in js, "lost the freeform textarea selector"
+    assert "I leave it to the best of your judgement" in js, "lost the deferential answer text"
+    assert "HTMLTextAreaElement.prototype" in js, "must use the React-safe native value setter"
+    assert "shouldDeferForTyping()" in js, "must defer while the user is typing"
+
+
+def test_typing_guard_covers_questionnaire_textarea():
+    assert "composer-questionnaire" in finder._JS_TYPING_GUARD  # noqa: SLF001
+
+
 def test_codex_handlers_cover_both_ui_generations():
     for name in ("CLICK_CODEX_PROMPT_JS", "COUNTDOWN_CODEX_BADGE_JS"):
         js = PREP_HANDLERS[name]

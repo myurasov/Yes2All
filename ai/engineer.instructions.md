@@ -110,7 +110,13 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
     gated, is clicked every tick (acting on a user question) while starving real approvals later in
     the DOM walk (first-match-only clicking). All Cursor page finders skip
     `[class*="composer-questionnaire"], .has-pending-questionnaire` subtrees when
-    ignore-user-questions is on.
+    ignore-user-questions is on. Structure (probed live): options are
+    `div.composer-questionnaire-toolbar-option[role=button]`; the "Other" option carries
+    `-option-freeform` and pairs with `textarea.composer-questionnaire-toolbar-freeform-input`;
+    actions are Skip/Continue divs; a `-stepper-label` shows "N of M" for multi-question forms. With
+    ignore-user-questions OFF, `CLICK_QUESTIONNAIRE_JS` answers each question: select freeform, set the
+    textarea via the native value setter + input event (React ignores plain .value writes), click
+    Continue, and mark `data-y2a-q-done=<stepper>` so it waits for the stepper to advance.
   - Chat input: `div.aislash-editor-input[contenteditable]` (ancestor `composer-input-blur-wrapper`).
   - Inactive chat tabs are **unmounted**; sweep mode activates a tab with a real `mousedown` (click alone
     is ignored), waits for `.active` + composer text change, then restores the original tab.

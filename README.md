@@ -91,6 +91,7 @@ uv run yes2all service install --port 9222 --port 9333 --interval 1 --no-sweep-t
 | Cursor / VS Code Codex | Webview iframe prompt | Older UI: selects the `Yes` radio and submits. Newer "request card" UI: clicks the affirmative submit button (`Allow once`), never `Deny` or the command header |
 | VS Code Claude Code | Webview iframe prompt | Handles direct numbered affirmative buttons and radio + submit variants |
 | Cursor / Claude / Codex | User-facing question (no Yes/Allow option) | Left untouched for you to answer while `--ignore-user-questions` is on (the default); logged as `SKIPPED user-question` |
+| Cursor | Questionnaire (native user-question form, incl. multi-select + "Other" text field) | With `--ignore-user-questions` (default): never touched, even while you select options and type. With `--no-ignore-user-questions`: selects "Other", types "I leave it to the best of your judgement, operate with best safety practices and use common sense.", and submits each question |
 
 By default Yes2All only checks the active Cursor chat tab. Use `--sweep-tabs --countdown 0` when you want it to briefly cycle inactive Cursor chat tabs looking for pending approvals.
 

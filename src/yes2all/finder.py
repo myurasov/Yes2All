@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 # ---------------------------------------------------------------------------
 # Shared JS library snippets. Handlers below embed these via __Y2A_*__ tokens,
 # expanded once at import time by _expand_lib() at the bottom of this module.
@@ -48,7 +50,8 @@ _JS_TYPING_GUARD = r"""const __Y2A_RESUME_MS = __RESUME_MS__;
       a.closest(".chat-widget") ||
       a.closest("[class*='chat-editor']") ||
       a.closest("[class*='composer-input']") ||
-      a.closest("[class*='aislash-editor']")
+      a.closest("[class*='aislash-editor']") ||
+      a.closest("[class*='composer-questionnaire']")
     ));
   }
   function shouldDeferForTyping() {
@@ -1025,6 +1028,77 @@ def countdown_claude_js(seconds: float) -> str:
     return COUNTDOWN_CLAUDE_BADGE_JS.replace("__COUNTDOWN_SECS__", str(seconds))
 
 
+# Cursor questionnaire (native user-question) auto-answer, used ONLY when
+# --no-ignore-user-questions: selects the freeform ("Other") option, types a
+# deliberately deferential answer via the React-safe native value setter, and
+# clicks Continue. With ignore-user-questions on (the default) questionnaires
+# are never touched at all (the page finders skip their subtree).
+QUESTIONNAIRE_ANSWER_TEXT = (
+    "I leave it to the best of your judgement, operate with best safety practices and use common sense."
+)
+
+CLICK_QUESTIONNAIRE_JS = r"""
+(() => {
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+  if (IGNORE_USER_QUESTIONS) return JSON.stringify({count: 0, results: []});
+  __Y2A_TYPING_GUARD_FNS__
+  if (shouldDeferForTyping()) {
+    return JSON.stringify({count: 0, results: [], deferred: "user-typing"});
+  }
+  __Y2A_REAL_CLICK_FN__
+  const ANSWER = __Y2A_QUESTIONNAIRE_ANSWER__;
+  function visible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  }
+  function firstLine(t) { return ((t || "").split(/\r?\n/)[0] || "").trim(); }
+  const results = [];
+  for (const bar of document.querySelectorAll(".composer-questionnaire-toolbar")) {
+    if (!visible(bar)) continue;
+    // One answer per stepper position; wait for the stepper to advance (or
+    // the questionnaire to disappear) before acting again.
+    const step = ((bar.querySelector(".composer-questionnaire-toolbar-stepper-label") || {}).innerText || "").trim();
+    if (step && bar.getAttribute("data-y2a-q-done") === step) continue;
+    const q = (((bar.innerText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean)).find(l => l.endsWith("?")) || "").slice(0, 120);
+    const free = bar.querySelector(".composer-questionnaire-toolbar-option-freeform");
+    const ta = bar.querySelector("textarea.composer-questionnaire-toolbar-freeform-input");
+    let how = "";
+    if (free) { __y2aRealClick(free); how = "freeform"; }
+    if (ta) {
+      try {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+        setter.call(ta, ANSWER);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        how += "+typed";
+      } catch (_) {}
+    }
+    if (!free && !ta) {
+      // No freeform option: fall back to the first non-negative option.
+      for (const opt of bar.querySelectorAll(".composer-questionnaire-toolbar-option")) {
+        const lines = (opt.innerText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const label = lines[lines.length - 1] || "";
+        if (/^(no\b|none\b|skip\b|cancel\b)/i.test(label)) continue;
+        __y2aRealClick(opt);
+        how = "first-option";
+        break;
+      }
+    }
+    let cont = null;
+    for (const el of bar.querySelectorAll(".composer-run-button, [class*='cursor-pointer']")) {
+      const t = firstLine(el.innerText);
+      if (/^(continue|submit|done)$/i.test(t)) { cont = el; break; }
+    }
+    if (!cont) continue;
+    __y2aRealClick(cont);
+    if (step) bar.setAttribute("data-y2a-q-done", step);
+    results.push({question: q, how});
+  }
+  return JSON.stringify({count: results.length, results});
+})()
+"""
+
+
 # VS Code Copilot Chat renders tool-confirmation prompts as a "carousel" widget
 # (`div.chat-question-carousel-container`). It's a listbox of numbered options
 # with a Submit button; affirmative is typically option #1 (e.g. "Yes, run it").
@@ -1686,6 +1760,9 @@ CLICK_CODEX_PROMPT_JS = _expand_lib(CLICK_CODEX_PROMPT_JS)
 DETECT_CHAT_TEXT_CONFIRM_JS = _expand_lib(DETECT_CHAT_TEXT_CONFIRM_JS)
 
 IFRAME_TYPING_PROBE_JS = _expand_lib(IFRAME_TYPING_PROBE_JS)
+CLICK_QUESTIONNAIRE_JS = _expand_lib(CLICK_QUESTIONNAIRE_JS).replace(
+    "__Y2A_QUESTIONNAIRE_ANSWER__", json.dumps(QUESTIONNAIRE_ANSWER_TEXT)
+)
 
 _ALL_HANDLERS = {
     "IFRAME_TYPING_PROBE_JS": IFRAME_TYPING_PROBE_JS,
@@ -1695,6 +1772,7 @@ _ALL_HANDLERS = {
     "COUNTDOWN_CODEX_BADGE_JS": COUNTDOWN_CODEX_BADGE_JS,
     "CLICK_CLAUDE_PROMPT_JS": CLICK_CLAUDE_PROMPT_JS,
     "COUNTDOWN_CLAUDE_BADGE_JS": COUNTDOWN_CLAUDE_BADGE_JS,
+    "CLICK_QUESTIONNAIRE_JS": CLICK_QUESTIONNAIRE_JS,
     "CLICK_CHAT_QUESTION_JS": CLICK_CHAT_QUESTION_JS,
     "CLICK_CHAT_CONFIRMATION_JS": CLICK_CHAT_CONFIRMATION_JS,
     "SWEEP_TABS_AND_CLICK_JS": SWEEP_TABS_AND_CLICK_JS,
