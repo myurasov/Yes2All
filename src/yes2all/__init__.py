@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Yes2All — auto-approve agent tool prompts in Cursor / VS Code via CDP."""
-__version__ = "1.6.0"
+__version__ = "1.6.1"
