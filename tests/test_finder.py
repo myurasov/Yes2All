@@ -78,6 +78,21 @@ def test_iframe_handlers_have_typing_guard():
         assert "data-y2a-last-key" in js, f"{name} missing the keystroke hook"
 
 
+def test_cursor_finders_skip_questionnaire_ui():
+    """Cursor's questionnaire (user-question) Continue button carries
+    composer-run-button classes; without the gate it is clicked every tick and
+    starves real approvals behind it."""
+    for name in (
+        "FIND_APPROVAL_BUTTONS_JS",
+        "CLICK_FIRST_APPROVAL_JS",
+        "COUNTDOWN_BADGE_JS",
+        "SWEEP_TABS_AND_CLICK_JS",
+    ):
+        js = PREP_HANDLERS[name]
+        assert "composer-questionnaire" in js, f"{name} does not know the questionnaire UI"
+        assert "__Y2A_IGNORE_USER_QUESTIONS__" in js or "IGNORE_USER_QUESTIONS" in js, f"{name} lacks the IUQ gate"
+
+
 def test_codex_handlers_cover_both_ui_generations():
     for name in ("CLICK_CODEX_PROMPT_JS", "COUNTDOWN_CODEX_BADGE_JS"):
         js = PREP_HANDLERS[name]

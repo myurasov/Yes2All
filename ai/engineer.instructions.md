@@ -104,6 +104,13 @@ Selector knowledge rots as editors update - re-verify against a live editor via 
   - Exclude `span.mcp-header-verb` (description text) and collapsed status headers like
     `Run MCP attempted` - `strictVerbMatch()` requires the first alpha run to be a verb and all
     later runs <= 1 char.
+  - **Questionnaire (native user-question) UI** (verified live 2026-08-09): container classes
+    `composer-questionnaire-toolbar` under a `has-pending-questionnaire` ancestor; its "Continue ⏎"
+    button carries `composer-run-button` classes, so it matches `isApprovalSpecific()` and, unless
+    gated, is clicked every tick (acting on a user question) while starving real approvals later in
+    the DOM walk (first-match-only clicking). All Cursor page finders skip
+    `[class*="composer-questionnaire"], .has-pending-questionnaire` subtrees when
+    ignore-user-questions is on.
   - Chat input: `div.aislash-editor-input[contenteditable]` (ancestor `composer-input-blur-wrapper`).
   - Inactive chat tabs are **unmounted**; sweep mode activates a tab with a real `mousedown` (click alone
     is ignored), waits for `.active` + composer text change, then restores the original tab.

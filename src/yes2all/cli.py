@@ -64,7 +64,9 @@ def probe(
             print("No page targets found.")
             return
         # Debug command: no typing-deferral (max_defer 0 = always report/click).
-        js = with_resume_delay(CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS, 0)
+        js = with_ignore_user_questions(
+            with_resume_delay(CLICK_FIRST_APPROVAL_JS if click else FIND_APPROVAL_BUTTONS_JS, 0), True
+        )
         total = 0
         for p in pages:
             print(f"\n[page] {p.title}")
@@ -179,7 +181,7 @@ def watch(
     # A tab sweep legitimately runs ~1.5s per inactive chat tab; give it a
     # far larger CDP deadline than single-shot handlers.
     eval_timeout = 60.0 if sweep_tabs else 15.0
-    js = with_resume_delay(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS, resume_delay)
+    js = _prep(SWEEP_TABS_AND_CLICK_JS if sweep_tabs else CLICK_FIRST_APPROVAL_JS)
     js_cd = _prep(countdown_js(countdown)) if use_countdown else ""
     js_cd_codex = with_resume_delay(countdown_codex_js(countdown), resume_delay) if use_countdown else ""
     js_cd_claude = _prep(countdown_claude_js(countdown)) if use_countdown else ""
@@ -357,6 +359,7 @@ def watch(
                             data_cc = {}
                         p_label = f"{prt}/{p.title}"
                         port_typing = port_typing or bool(data.get("typing") or data.get("deferred"))
+                        _log_skipped(p_label, data, "questionnaire")
                         clicked = _summarize_click(p_label, data)
                         _log_skipped(p_label, data_cq, "carousel")
                         cq_n = int(data_cq.get("count", 0) or 0)

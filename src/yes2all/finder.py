@@ -161,6 +161,16 @@ FIND_APPROVAL_BUTTONS_JS = r"""
 (() => {
   const VERBS = ["Run", "Allow", "Approve", "Accept", "Yes", "Submit"];
   const results = [];
+  const skipped = [];
+  // Cursor's native user-question widget ("questionnaire"): its Continue
+  // button carries composer-run-button classes, so without this gate it
+  // matches as an approval, gets clicked every tick (acting on a question
+  // the user should answer), and starves any real approval later in the DOM.
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
+  function inQuestionnaire(el) {
+    if (!el || !el.closest) return null;
+    return el.closest('[class*="composer-questionnaire"], .has-pending-questionnaire');
+  }
 
   // Defer auto-clicks while the user is mid-typing in a chat input. The
   // `__DEFER_IF_TYPING` flag is `false` in the read-only `find` variant and
@@ -327,9 +337,20 @@ FIND_APPROVAL_BUTTONS_JS = r"""
     if (seen.has(target)) continue;
     seen.add(target);
     if (!visible(target)) continue;
+    if (IGNORE_USER_QUESTIONS) {
+      const q = inQuestionnaire(target);
+      if (q) {
+        if (!q.hasAttribute("data-y2a-skipped")) {
+          q.setAttribute("data-y2a-skipped", "1");
+          const qls = ((q.innerText || q.textContent) || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          skipped.push((qls.find(l => l.endsWith("?")) || qls[0] || "").slice(0, 120));
+        }
+        continue;
+      }
+    }
     results.push(describe(target));
   }
-  return JSON.stringify({ url: location.href, count: results.length, buttons: results, typing: shouldDeferForTyping() });
+  return JSON.stringify({ url: location.href, count: results.length, buttons: results, skipped, typing: shouldDeferForTyping() });
 })()
 """
 
@@ -479,6 +500,16 @@ COUNTDOWN_BADGE_JS = r"""
     if (!isApprovalSpecific(t) && !strictVerbMatch(txt)) continue;
     if (seen.has(t) || !visible(t)) continue;
     seen.add(t);
+    // Skip Cursor questionnaire (user-question) UI - see FIND_APPROVAL_BUTTONS_JS.
+    if (IGNORE_USER_QUESTIONS && t.closest && t.closest('[class*="composer-questionnaire"], .has-pending-questionnaire')) {
+      const q = t.closest('[class*="composer-questionnaire"], .has-pending-questionnaire');
+      if (!q.hasAttribute("data-y2a-skipped")) {
+        q.setAttribute("data-y2a-skipped", "1");
+        const qls = ((q.innerText || q.textContent) || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          skipped.push((qls.find(l => l.endsWith("?")) || qls[0] || "").slice(0, 120));
+      }
+      continue;
+    }
 
     let deadline = parseInt(t.getAttribute(BADGE_ATTR) || "0", 10);
     if (!deadline) { deadline = now + DELAY_MS; t.setAttribute(BADGE_ATTR, String(deadline)); }
@@ -1250,6 +1281,7 @@ SWEEP_TABS_AND_CLICK_JS = r"""
     for (const c of APPROVAL_BUTTON_CLASSES) if (el.classList.contains(c)) return true;
     return false;
   }
+  const IGNORE_USER_QUESTIONS = __Y2A_IGNORE_USER_QUESTIONS__;
   function findApproval() {
     for (const node of document.querySelectorAll("*")) {
       const txt = textOf(node);
@@ -1258,6 +1290,8 @@ SWEEP_TABS_AND_CLICK_JS = r"""
       if (!target || !visible(target)) continue;
       // Cursor-specific approval class (verb varies: Run, Fetch, ...) OR strict verb match.
       if (!isApprovalSpecific(target) && !strictVerbMatch(txt)) continue;
+      // Skip Cursor questionnaire (user-question) UI - see FIND_APPROVAL_BUTTONS_JS.
+      if (IGNORE_USER_QUESTIONS && target.closest && target.closest('[class*="composer-questionnaire"], .has-pending-questionnaire')) continue;
       return target;
     }
     return null;
